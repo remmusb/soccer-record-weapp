@@ -1,0 +1,322 @@
+<template>
+  <view class="container" v-if="match">
+    <view class="card">
+      <view class="match-title">{{match.title}}</view>
+      <view class="match-meta">赛后评分 · {{match.date}}</view>
+    </view>
+
+    <view class="card" v-if="!isRateWindowOpen">
+      <view class="no-permission">
+        <view class="no-perm-icon">🔒</view>
+        <view class="no-perm-title">{{rateWindowStatus}}</view>
+        <view class="no-perm-text">评分窗口由管理员手动控制</view>
+      </view>
+    </view>
+
+    <!-- 队友互评 -->
+    <view class="card" v-if="isPlayer && isRateWindowOpen">
+      <view class="section-title">🤝 队友互评（24小时有效）</view>
+      <view class="rate-list">
+        <view class="rate-item" v-for="p in teammates" :key="p._id">
+          <view class="rate-info">
+            <view class="avatar">{{p.nickname[0]}}</view>
+            <view>
+              <view class="rate-name">{{p.nickname}}</view>
+              <!-- 位置信息已移除 -->
+            </view>
+          </view>
+          <view class="rate-stars">
+            <view class="star" v-for="i in 10" :key="i" :class="{'active': (peerScores[p._id] || 0) >= i}" @click="setPeerScore(p._id, i)">
+              {{i}}
+            </view>
+          </view>
+          <view class="rate-value">{{peerScores[p._id] || 0}} 分</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 管理员评分 -->
+    <view class="card" v-if="isAdmin && isRateWindowOpen">
+      <view class="section-title">👑 管理员评分</view>
+      <view class="rate-list">
+        <view class="rate-item" v-for="p in allPlayers" :key="p._id">
+          <view class="rate-info">
+            <view class="avatar">{{p.nickname[0]}}</view>
+            <view>
+              <view class="rate-name">{{p.nickname}}</view>
+              <!-- 位置信息已移除 -->
+            </view>
+          </view>
+          <view class="rate-stars">
+            <view class="star" v-for="i in 10" :key="i" :class="{'active': (adminScores[p._id] || 0) >= i}" @click="setAdminScore(p._id, i)">
+              {{i}}
+            </view>
+          </view>
+          <view class="rate-value">{{adminScores[p._id] || 0}} 分</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 无权限提示 -->
+    <view class="card" v-if="!isPlayer && !isAdmin">
+      <view class="no-permission">
+        <view class="no-perm-icon">🔒</view>
+        <view class="no-perm-title">无法评分</view>
+        <view class="no-perm-text">您不是本场比赛的参赛队员或管理员</view>
+      </view>
+    </view>
+
+    <view class="btn-primary" v-if="(isPlayer || isAdmin) && isRateWindowOpen" style="margin-top: 20rpx" @click="submit">提交评分</view>
+    <view class="submit-summary" v-if="(isPlayer || isAdmin) && isRateWindowOpen">
+      已给 {{(isPlayer ? Object.values(peerScores).filter(s => s > 0).length : 0) + (isAdmin ? Object.values(adminScores).filter(s => s > 0).length : 0)}} 人打分
+    </view>
+  </view>
+</template>
+
+<script>
+const db = wx.cloud.database();
+const _ = db.command;
+
+const POSITIONS = [
+  { id: 'GK', name: '门将' }, { id: 'CB', name: '中后卫' }, { id: 'LB', name: '左后卫' },
+  { id: 'RB', name: '右后卫' }, { id: 'CDM', name: '后腰' }, { id: 'CM', name: '中场' },
+  { id: 'CAM', name: '前腰' }, { id: 'LW', name: '左边锋' }, { id: 'RW', name: '右边锋' },
+  { id: 'ST', name: '前锋' }, { id: 'CF', name: '中锋' },
+];
+
+export default {
+  data() {
+    return {
+      matchId: '',
+      match: { teamA: { players: [], score: 0 }, teamB: { players: [], score: 0 }, registrations: [], events: [] },
+      players: {},
+      openid: '',
+      currentPlayerId: '',
+      isAdmin: false,
+      peerScores: {},
+      adminScores: {},
+    }
+  },
+  onLoad(options) {
+    this.matchId = options.id;
+    this.loadData();
+  },
+  computed: {
+    allPlayers() {
+      if (!this.match) return [];
+      // 排除临时队员和未确认球员
+      const tempIds = new Set((this.match.registrations || [])
+        .filter(r => r.isTempPlayer)
+        .map(r => r.playerId));
+      // 名单中所有已确认（confirmed）球员 + 分队球员 + 赛况球员
+      const ids = [...new Set([
+        ...((this.match.registrations || [])
+          .filter(r => !r.isTempPlayer && r.status === 'confirmed')
+          .map(r => r.playerId)),
+        ...(this.match.teamA?.players || []),
+        ...(this.match.teamB?.players || []),
+        ...((this.match.events || []).map(e => e.playerId))
+      ].filter(id => !tempIds.has(id) && id))];
+      const players = ids.map(id => this.players[id]).filter(Boolean);
+      return players;
+    },
+    teammates() {
+      // 只显示允许评分的队友（管理员除外）
+      return this.allPlayers.filter(p => p._id !== this.currentPlayerId && p.allowRating !== false);
+    },
+    isPlayer() {
+      // 只有已确认报名（confirmed）的非临时球员才能评分
+      const confirmedIds = (this.match.registrations || [])
+        .filter(r => !r.isTempPlayer && r.status === 'confirmed')
+        .map(r => r.playerId);
+      return confirmedIds.includes(this.currentPlayerId);
+    },
+    isRateWindowOpen() {
+      // 评分窗口由管理员控制开关
+      return this.match?.ratingOpen === true;
+    },
+    rateWindowStatus() {
+      if (!this.match?.ratingOpen) return '评分窗口已关闭（管理员未开启）';
+      return '评分窗口开放中';
+    }
+  },
+  methods: {
+    async loadData() {
+      wx.showLoading({ title: '加载中' });
+      try {
+        const { result } = await wx.cloud.callFunction({ name: 'login' });
+        this.openid = result.openid;
+        this.isAdmin = result.isAdmin;
+        this.currentPlayerId = result.playerId || '';
+
+        const { data } = await db.collection('matches').doc(this.matchId).get();
+        this.match = data;
+        // 使用数据库中的 _id 作为 matchId，确保与 detail.vue 绝对一致
+        this.matchId = data._id || this.matchId;
+
+        // 加载所有 confirmed + pending_screenshot 的注册球员 + 分队球员 + 赛况球员 + 场主/护法
+        const playerIds = [...new Set([
+          ...((data.registrations || [])
+            .filter(r => r.status === 'confirmed' || r.status === 'pending_screenshot')
+            .map(r => r.playerId)),
+          ...(data.teamA?.players || []),
+          ...(data.teamB?.players || []),
+          ...((data.events || []).map(e => e.playerId)),
+          data.ownerId,
+          data.assistantId,
+          ...(data.assistantIds || [])
+        ].filter(Boolean))];
+
+        if (playerIds.length > 0) {
+          // 纯客户端方案：通过 getPlayers 获取所有球员，然后在客户端过滤
+          let pList = [];
+          try {
+            const { result: allPlayersRes } = await wx.cloud.callFunction({ name: 'getPlayers' });
+            if (allPlayersRes && allPlayersRes.players) {
+              pList = allPlayersRes.players.filter(p => playerIds.includes(p._id));
+            }
+          } catch (e) {
+            console.error('getPlayers 调用失败:', e);
+            // 最后回退到客户端查询
+            try {
+              const { data } = await db.collection('players')
+                .where({ _id: _.in(playerIds) })
+                .get();
+              pList = data || [];
+            } catch (e2) {
+              console.error('客户端查询也失败:', e2);
+            }
+          }
+          const newPlayers = {};
+          pList.forEach(p => { newPlayers[p._id] = p; });
+          this.players = newPlayers;
+
+          // 初始化评分对象（加载已有的评分）
+          const peerScores = {};
+          const adminScores = {};
+          for (const p of Object.values(newPlayers)) {
+            if (!p._id || p._id === this.currentPlayerId) continue;
+
+            // 队友互评：查找当前用户对该球员的已有评分
+            const existingPeer = p.ratings?.peerRatings || [];
+            const peerScore = existingPeer
+              .filter(r => r.matchId === this.matchId)
+              .find(r => r.fromId === this.currentPlayerId);
+            peerScores[p._id] = peerScore ? peerScore.score : 0;
+
+            // 管理员评分
+            if (this.isAdmin) {
+              const existingAdmin = p.ratings?.adminRatings || [];
+              const adminScore = existingAdmin
+                .filter(r => r.matchId === this.matchId)
+                .find(r => r.fromId === this.currentPlayerId);
+              adminScores[p._id] = adminScore ? adminScore.score : 0;
+            }
+          }
+          this.peerScores = peerScores;
+          this.adminScores = adminScores;
+        }
+      } catch (e) { console.error(e); }
+      wx.hideLoading();
+    },
+    getPositions(p) {
+      if (!p?.positions) return '';
+      return p.positions.map(pos => POSITIONS.find(pt => pt.id === pos)?.name || pos).join(' ');
+    },
+    setPeerScore(id, score) {
+      this.peerScores = { ...this.peerScores, [id]: score };
+    },
+    setAdminScore(id, score) {
+      this.adminScores = { ...this.adminScores, [id]: score };
+    },
+    async submit() {
+      const peerCount = Object.values(this.peerScores).filter(s => s > 0).length;
+      const adminCount = Object.values(this.adminScores).filter(s => s > 0).length;
+      const totalCount = peerCount + adminCount;
+      
+      if (totalCount === 0) {
+        uni.showToast({ title: '您没有给任何人打分', icon: 'none' });
+        return;
+      }
+      
+      const confirmRes = await new Promise(resolve => {
+        uni.showModal({
+          title: '确认提交',
+          content: `即将提交 ${peerCount} 条队友互评 + ${adminCount} 条管理员评分，共 ${totalCount} 条评分。确认？`,
+          success: resolve
+        });
+      });
+      
+      if (!confirmRes.confirm) return;
+      
+      wx.showLoading({ title: '提交中' });
+      try {
+        // 构建评分数据
+        const peerRatings = Object.entries(this.peerScores)
+          .filter(([_, score]) => score > 0)
+          .map(([pid, score]) => ({ pid, score }));
+        const adminRatings = Object.entries(this.adminScores)
+          .filter(([_, score]) => score > 0)
+          .map(([pid, score]) => ({ pid, score }));
+
+        console.log('提交评分数据:', { matchId: this.matchId, peerRatings, adminRatings, fromId: this.currentPlayerId });
+
+        // 通过云函数提交评分（绕过客户端权限限制）
+        const { result } = await wx.cloud.callFunction({
+          name: 'submitRating',
+          data: {
+            matchId: this.matchId,
+            peerRatings,
+            adminRatings,
+            fromId: this.currentPlayerId
+          }
+        });
+
+        console.log('submitRating 返回:', result);
+
+        if (!result || !result.success) {
+          throw new Error(result?.error || '云函数返回失败');
+        }
+
+        // 等待数据同步
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 重新计算统计
+        await wx.cloud.callFunction({ name: 'recalculateStats' });
+
+        uni.showToast({ title: '评分已提交' });
+        setTimeout(() => uni.navigateBack(), 800);
+      } catch (e) {
+        console.error('提交失败详情:', e);
+        uni.showToast({ title: '提交失败: ' + (e.message || e.errMsg || JSON.stringify(e)), icon: 'none', duration: 3000 });
+      }
+      wx.hideLoading();
+    }
+  }
+}
+</script>
+
+<style scoped>
+.container { padding: 20rpx; padding-bottom: 40rpx; }
+.card { background: #fff; border-radius: 16rpx; padding: 24rpx; margin-bottom: 20rpx; box-shadow: 0 2rpx 8rpx rgba(0,0,0,0.04); }
+.match-title { font-size: 34rpx; font-weight: 700; color: #111827; }
+.match-meta { font-size: 26rpx; color: #6b7280; margin-top: 8rpx; }
+.section-title { font-size: 30rpx; font-weight: 700; margin-bottom: 20rpx; }
+.rate-list { display: flex; flex-direction: column; gap: 24rpx; }
+.rate-item { display: flex; justify-content: space-between; align-items: center; padding: 16rpx 0; border-bottom: 2rpx solid #f3f4f6; }
+.rate-info { display: flex; align-items: center; gap: 16rpx; }
+.avatar { width: 64rpx; height: 64rpx; border-radius: 50%; background: #dcfce7; color: #166534; font-weight: 700; font-size: 28rpx; display: flex; align-items: center; justify-content: center; }
+.rate-name { font-size: 30rpx; font-weight: 600; }
+.rate-pos { font-size: 24rpx; color: #9ca3af; margin-top: 4rpx; }
+.rate-stars { display: flex; gap: 8rpx; }
+.star { width: 48rpx; height: 48rpx; border-radius: 8rpx; background: #f3f4f6; display: flex; align-items: center; justify-content: center; font-size: 24rpx; color: #9ca3af; }
+.star.active { background: #fbbf24; color: #fff; }
+.rate-value { font-size: 28rpx; font-weight: 600; color: #16a34a; width: 80rpx; text-align: right; }
+.no-permission { text-align: center; padding: 60rpx 40rpx; }
+.no-perm-icon { font-size: 64rpx; margin-bottom: 16rpx; }
+.no-perm-title { font-size: 32rpx; font-weight: 700; color: #111827; margin-bottom: 8rpx; }
+.no-perm-text { font-size: 26rpx; color: #9ca3af; }
+.btn-primary { background: #16a34a; color: #fff; border-radius: 16rpx; padding: 28rpx 0; text-align: center; font-weight: 600; font-size: 32rpx; }
+
+.submit-summary { font-size: 26rpx; color: #6b7280; text-align: center; margin-top: 16rpx; }
+</style>

@@ -1,0 +1,7 @@
+{
+  "name": "getMatchPlayers",
+  "version": "1.0.0",
+  "description": "查询比赛球员列表",
+  "main": "index.js",
+  "dependencies": {}
+}

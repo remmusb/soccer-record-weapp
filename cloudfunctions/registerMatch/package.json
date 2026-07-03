@@ -1,0 +1,9 @@
+{
+  "name": "registerMatch",
+  "version": "1.0.0",
+  "description": "Match registration cloud function",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}
