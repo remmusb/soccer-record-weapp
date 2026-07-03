@@ -84,6 +84,24 @@
           </view>
         </view>
       </view>
+      <view class="form-row">
+        <view class="form-group" style="flex:1">
+          <text class="form-label">身高(cm)</text>
+          <input class="form-input" v-model="form.height" placeholder="170" type="number" />
+        </view>
+        <view class="form-group" style="flex:1;margin-left:20rpx">
+          <text class="form-label">体重(kg)</text>
+          <input class="form-input" v-model="form.weight" placeholder="70" type="number" />
+        </view>
+      </view>
+      <view class="form-group">
+        <text class="form-label">惯用脚</text>
+        <view class="foot-row">
+          <view class="foot-option" :class="{'selected': form.foot === '左脚'}" @click="form.foot = '左脚'">左脚</view>
+          <view class="foot-option" :class="{'selected': form.foot === '右脚'}" @click="form.foot = '右脚'">右脚</view>
+          <view class="foot-option" :class="{'selected': form.foot === '左右脚'}" @click="form.foot = '左右脚'">左右脚</view>
+        </view>
+      </view>
 
       <view class="submit-bar">
         <view class="btn-primary" @click="updateMyPlayer">保存修改</view>
@@ -166,6 +184,24 @@
           </view>
         </view>
       </view>
+      <view class="form-row">
+        <view class="form-group" style="flex:1">
+          <text class="form-label">身高(cm)</text>
+          <input class="form-input" v-model="form.height" placeholder="170" type="number" />
+        </view>
+        <view class="form-group" style="flex:1;margin-left:20rpx">
+          <text class="form-label">体重(kg)</text>
+          <input class="form-input" v-model="form.weight" placeholder="70" type="number" />
+        </view>
+      </view>
+      <view class="form-group">
+        <text class="form-label">惯用脚</text>
+        <view class="foot-row">
+          <view class="foot-option" :class="{'selected': form.foot === '左脚'}" @click="form.foot = '左脚'">左脚</view>
+          <view class="foot-option" :class="{'selected': form.foot === '右脚'}" @click="form.foot = '右脚'">右脚</view>
+          <view class="foot-option" :class="{'selected': form.foot === '左右脚'}" @click="form.foot = '左右脚'">左右脚</view>
+        </view>
+      </view>
 
       <view class="submit-bar">
         <view class="btn-primary" @click="createMyPlayer">创建我的资料</view>
@@ -242,6 +278,24 @@
           </view>
         </view>
       </view>
+      <view class="form-row">
+        <view class="form-group" style="flex:1">
+          <text class="form-label">身高(cm)</text>
+          <input class="form-input" v-model="adminForm.height" placeholder="170" type="number" />
+        </view>
+        <view class="form-group" style="flex:1;margin-left:20rpx">
+          <text class="form-label">体重(kg)</text>
+          <input class="form-input" v-model="adminForm.weight" placeholder="70" type="number" />
+        </view>
+      </view>
+      <view class="form-group">
+        <text class="form-label">惯用脚</text>
+        <view class="foot-row">
+          <view class="foot-option" :class="{'selected': adminForm.foot === '左脚'}" @click="adminForm.foot = '左脚'">左脚</view>
+          <view class="foot-option" :class="{'selected': adminForm.foot === '右脚'}" @click="adminForm.foot = '右脚'">右脚</view>
+          <view class="foot-option" :class="{'selected': adminForm.foot === '左右脚'}" @click="adminForm.foot = '左右脚'">左右脚</view>
+        </view>
+      </view>
       <view class="btn-secondary" style="margin-top:16rpx" @click="createOtherPlayer">为他人创建资料</view>
     </view>
   </view>
@@ -270,8 +324,8 @@ export default {
       loading: true,
       myPlayer: null,
       isAdmin: false,
-      form: { name: '', nickname: '', kttLast4: '', birthDate: '', positions: [], initialRating: 5, avatar: '', allowRating: true },
-      adminForm: { name: '', nickname: '', kttLast4: '', birthDate: '', positions: [], initialRating: 5, avatar: '', allowRating: true },
+      form: { name: '', nickname: '', kttLast4: '', birthDate: '', positions: [], initialRating: 5, avatar: '', allowRating: true, height: '', weight: '', foot: '' },
+      adminForm: { name: '', nickname: '', kttLast4: '', birthDate: '', positions: [], initialRating: 5, avatar: '', allowRating: true, height: '', weight: '', foot: '' },
     }
   },
   onLoad() {

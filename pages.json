@@ -25,6 +25,14 @@
       }
     },
     {
+      "path": "pages/match/edit",
+      "style": {
+        "navigationBarTitleText": "编辑场次",
+        "navigationBarBackgroundColor": "#16a34a",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/match/record",
       "style": {
         "navigationBarTitleText": "记录赛况",
@@ -84,6 +92,22 @@
       "path": "pages/players/my",
       "style": {
         "navigationBarTitleText": "我的",
+        "navigationBarBackgroundColor": "#16a34a",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/agreement/index",
+      "style": {
+        "navigationBarTitleText": "用户服务协议",
+        "navigationBarBackgroundColor": "#16a34a",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/privacy/index",
+      "style": {
+        "navigationBarTitleText": "隐私政策",
         "navigationBarBackgroundColor": "#16a34a",
         "navigationBarTextStyle": "white"
       }

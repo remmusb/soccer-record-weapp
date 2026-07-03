@@ -67,6 +67,18 @@
             <view class="foot-option" :class="{selected: form.foot === '左右脚'}" @click="form.foot = '左右脚'">左右脚</view>
           </view>
         </view>
+        <view class="form-item agreement-row">
+          <view class="agreement-checkbox" :class="{'checked': form.agreeTerms}" @click="form.agreeTerms = !form.agreeTerms">
+            <text v-if="form.agreeTerms">✅</text>
+            <text v-else>⬜</text>
+          </view>
+          <view class="agreement-text">
+            <text>我已阅读并同意</text>
+            <text class="agreement-link" @click.stop="goAgreement">《用户服务协议》</text>
+            <text>和</text>
+            <text class="agreement-link" @click.stop="goPrivacy">《隐私政策》</text>
+          </view>
+        </view>
         <button class="submit-btn" @click="saveNewPlayer">注册</button>
       </view>
     </view>
@@ -368,6 +380,10 @@ export default {
     },
 
     async saveNewPlayer() {
+      if (!this.form.agreeTerms) {
+        uni.showToast({ title: '请先同意用户服务协议和隐私政策', icon: 'none', duration: 3000 });
+        return;
+      }
       // 内容安全检查
       wx.showLoading({ title: '安全检查中' });
       try {
@@ -409,10 +425,13 @@ export default {
             weight: this.form.weight || '',
             foot: this.form.foot || '',
             positions: this.form.positions,
-            allowRating: this.form.allowRating !== false
+            allowRating: this.form.allowRating !== false,
+            agreeTerms: true
           }
         });
         if (result && result.success) {
+          // 保存同意协议状态到本地
+          wx.setStorageSync('hasAgreedTerms', true);
           uni.showToast({ title: '注册成功', icon: 'success' });
           await this.loadUser();
         } else {
@@ -424,6 +443,14 @@ export default {
       } finally {
         wx.hideLoading();
       }
+    },
+
+    goAgreement() {
+      uni.navigateTo({ url: '/pages/agreement/index' });
+    },
+
+    goPrivacy() {
+      uni.navigateTo({ url: '/pages/privacy/index' });
     },
 
     async requestSubscribeAuth(e) {
@@ -818,4 +845,9 @@ input,
 .rating-permission-row { display: flex; gap: 20rpx; }
 .rating-permission-option { flex: 1; padding: 20rpx 0; text-align: center; border-radius: 12rpx; font-size: 28rpx; font-weight: 600; color: #666; background: #f0f0f0; border: 2rpx solid transparent; }
 .rating-permission-option.selected { background: #e8f0fe; color: #667eea; border-color: #667eea; }
+
+.agreement-row { display: flex; align-items: center; gap: 16rpx; margin-top: 20rpx; }
+.agreement-checkbox { font-size: 36rpx; flex-shrink: 0; }
+.agreement-text { font-size: 24rpx; color: #666; line-height: 1.5; }
+.agreement-link { color: #667eea; }
 </style>

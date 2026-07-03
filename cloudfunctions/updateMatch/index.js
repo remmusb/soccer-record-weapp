@@ -22,10 +22,38 @@ async function checkText(content, openid) {
 exports.main = async (event, context) => {
   const db = cloud.database();
   const { OPENID } = cloud.getWXContext();
-  const { matchId, updateData } = event;
+  const { matchId, updateData, action } = event;
   
-  if (!matchId || !updateData) {
-    return { success: false, error: '缺少参数' };
+  if (!matchId) {
+    return { success: false, error: '缺少 matchId' };
+  }
+  
+  // 1. 获取比赛数据（无需管理员权限，用于编辑页面加载）
+  if (action === 'get') {
+    try {
+      const { data } = await db.collection('matches').doc(matchId).get();
+      if (!data) return { success: false, error: '场次不存在' };
+      return { success: true, match: data };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+  
+  if (!updateData) {
+    return { success: false, error: '缺少 updateData' };
+  }
+  
+  // 检查管理员权限
+  let isAdmin = false;
+  if (OPENID) {
+    const player = await db.collection('players').where({ _openid: OPENID }).get();
+    if (player.data.length > 0) {
+      const admin = await db.collection('admins').where({ playerId: player.data[0]._id }).get();
+      isAdmin = admin.data.length > 0;
+    }
+  }
+  if (!isAdmin) {
+    return { success: false, error: '无权限' };
   }
   
   // 内容安全检查

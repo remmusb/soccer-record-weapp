@@ -110,8 +110,8 @@ exports.main = async (event, context) => {
       registrations[idx].screenshot = screenshot;
       registrations[idx].screenshotUploadedAt = new Date();
       
-      // 如果之前是 pending_screenshot 或 screenshot_uploaded，更新为 screenshot_uploaded（等待管理员确认）
-      if (registrations[idx].status === 'pending_screenshot' || registrations[idx].status === 'screenshot_uploaded') {
+      // 如果之前是 pending_screenshot 或 screenshot_uploaded 或无状态（旧数据），更新为 screenshot_uploaded
+      if (registrations[idx].status === 'pending_screenshot' || registrations[idx].status === 'screenshot_uploaded' || !registrations[idx].status) {
         registrations[idx].status = 'screenshot_uploaded';
       }
       
@@ -132,8 +132,9 @@ exports.main = async (event, context) => {
       const idx = registrations.findIndex(r => r.playerId === targetId);
       if (idx < 0) return { success: false, error: '未报名' };
       
-      if (registrations[idx].status !== 'screenshot_uploaded') {
-        return { success: false, error: '该球员未上传截图' };
+      // 允许管理员确认 pending_screenshot、screenshot_uploaded 或无状态（旧数据）的报名
+      if (!['pending_screenshot', 'screenshot_uploaded'].includes(registrations[idx].status) && registrations[idx].status) {
+        return { success: false, error: '该报名状态不允许确认' };
       }
       
       registrations[idx].status = 'confirmed';
@@ -158,6 +159,31 @@ exports.main = async (event, context) => {
       }
       
       return { success: true, message: '截图已确认' };
+    }
+    
+    // 3.6 管理员取消确认截图
+    if (action === 'cancelConfirm') {
+      if (!isAdmin) return { success: false, error: '无权限' };
+      
+      const targetId = playerId;
+      if (!targetId) return { success: false, error: '缺少 playerId' };
+      
+      const idx = registrations.findIndex(r => r.playerId === targetId);
+      if (idx < 0) return { success: false, error: '未报名' };
+      
+      if (registrations[idx].status !== 'confirmed') {
+        return { success: false, error: '该报名尚未确认' };
+      }
+      
+      // 取消确认后，回到 screenshot_uploaded 状态（保留截图）
+      registrations[idx].status = 'screenshot_uploaded';
+      registrations[idx].confirmedAt = null;
+      
+      await db.collection('matches').doc(matchId).update({
+        data: { registrations }
+      });
+      
+      return { success: true, message: '已取消确认' };
     }
     
     // 4. 管理员添加球员
