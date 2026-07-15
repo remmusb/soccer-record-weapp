@@ -1,0 +1,9 @@
+{
+  "name": "getScreenshotURL",
+  "version": "1.0.0",
+  "description": "获取截图临时下载链接（解决跨用户权限问题）",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

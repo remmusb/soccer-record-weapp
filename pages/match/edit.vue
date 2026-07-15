@@ -132,7 +132,7 @@ export default {
   },
   methods: {
     async checkAdmin() {
-      try { const { result } = await wx.cloud.callFunction({ name: 'login' }); this.isAdmin = result.isAdmin || false; }
+      try { const { result } = await wx.cloud.callFunction({ name: 'login' }); this.isAdmin = result.isAdmin || result.isSuperAdmin || false; }
       catch (e) { this.isAdmin = false; }
     },
     async loadMatchData() {
@@ -176,7 +176,22 @@ export default {
         },
         fail: (err) => {
           if (err.errMsg && err.errMsg.includes('cancel')) return;
-          uni.showModal({ title: '地图选点失败', content: '请手动输入地点', showCancel: false, confirmText: '手动输入' });
+          console.error('地图选点失败', err);
+          let msg = '地图选点失败';
+          let extra = '';
+          if (err.errMsg && (err.errMsg.includes('auth deny') || err.errMsg.includes('authorize'))) {
+            msg = '位置权限未开启';
+            extra = '请在手机设置中允许小程序使用位置权限';
+          } else if (err.errMsg && err.errMsg.includes('permission')) {
+            msg = '小程序未开通地理位置接口';
+            extra = '需在小程序后台「开发管理→接口设置」中申请开通「获取用户位置信息」接口，审核通过后即可使用';
+          }
+          uni.showModal({
+            title: msg,
+            content: (extra ? extra + '。' : '') + '您也可以直接手动输入地点',
+            showCancel: false,
+            confirmText: '手动输入'
+          });
         }
       });
     },

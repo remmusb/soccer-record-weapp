@@ -12,3 +12,15 @@ $RECYCLE.BIN/
 
 # Node.js
 node_modules/
+
+# 微信小程序编译输出
+unpackage/
+
+# 备份文件
+*.bak
+
+# 云函数依赖（会自动安装）
+cloudfunctions/**/node_modules/
+
+# 敏感信息
+project.private.config.json

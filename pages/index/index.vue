@@ -66,7 +66,7 @@
         <view class="match-result">
           <view class="team-side">
             <view class="team team-a">
-              <view class="team-dot" :style="{background: m.teamA.color || '#16a34a'}"></view>
+              <view class="team-dot" :style="{background: getTeamDotColor(m.teamA)}"></view>
               <view class="team-color-name">{{getColorTeamName(m.teamA.color)}}</view>
               <view class="team-score">{{m.teamA.score}}</view>
             </view>
@@ -84,7 +84,7 @@
             <view class="team team-b">
               <view class="team-score">{{m.teamB.score}}</view>
               <view class="team-color-name">{{getColorTeamName(m.teamB.color)}}</view>
-              <view class="team-dot" :style="{background: m.teamB.color || '#dc2626'}"></view>
+              <view class="team-dot" :style="{background: getTeamDotColor(m.teamB)}"></view>
             </view>
             <view v-if="getTeamBGoals(m).length > 0" class="team-goals">
               <view class="team-goal-item" v-for="(g, idx) in getTeamBGoals(m)" :key="'b-'+idx">
@@ -250,6 +250,22 @@ export default {
       if (b > 120 && r > 120 && g < 100) return '紫队';
       if (r > 180 && g > 100 && g < 150 && b > 150) return '粉队';
       return '';
+    },
+    getTeamDotColor(team) {
+      const colorName = String(team?.color || team?.name || '').trim().toLowerCase();
+      if (colorName.includes('白') || colorName.includes('white')) return '#e5e7eb';
+      if (colorName.includes('黑') || colorName.includes('black')) return '#1f2937';
+      if (colorName.includes('灰') || colorName.includes('grey') || colorName.includes('gray')) return '#6b7280';
+      if (colorName.includes('红') || colorName.includes('red')) return '#dc2626';
+      if (colorName.includes('橙') || colorName.includes('orange')) return '#f97316';
+      if (colorName.includes('黄') || colorName.includes('yellow')) return '#facc15';
+      if (colorName.includes('绿') || colorName.includes('green')) return '#16a34a';
+      if (colorName.includes('青') || colorName.includes('cyan') || colorName.includes('teal')) return '#06b6d4';
+      if (colorName.includes('蓝') || colorName.includes('blue')) return '#3b82f6';
+      if (colorName.includes('紫') || colorName.includes('purple') || colorName.includes('violet')) return '#9333ea';
+      if (colorName.includes('粉') || colorName.includes('pink') || colorName.includes('玫')) return '#ec4899';
+      if (/^#[0-9a-f]{3,8}$/i.test(colorName)) return colorName;
+      return '#9ca3af';
     },
     getTeamAGoals(m) {
       const aPlayers = new Set(m.teamA?.players || []);

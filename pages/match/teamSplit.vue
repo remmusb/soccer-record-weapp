@@ -109,6 +109,14 @@
 <script>
 const db = wx.cloud.database();
 const _ = db.command;
+
+// 前场位置
+const FRONT_POSITIONS = ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];
+// 中场位置
+const MID_POSITIONS = ['CM', 'CAM', 'CDM'];
+// 后场位置
+const BACK_POSITIONS = ['GK', 'CB', 'LB', 'RB'];
+
 export default {
   data() {
     return {
@@ -126,11 +134,27 @@ export default {
   computed: {
     allRegistered() {
       if (!this.match) return [];
-      return (this.match.registrations || [])
-        .filter(r => r.status === 'confirmed')
-        .map(r => this.players[r.playerId])
-        .filter(Boolean);
+      // 分队取所有已确认的球员（不受maxPlayers限制），包括临时球员
+      const regs = (this.match.registrations || [])
+        .filter(r => r.status !== 'cancelled')
+        .map((r, idx) => ({ ...r, originalIndex: idx }));
+      
+      regs.sort((a, b) => {
+        const aProtected = (a.playerId === this.match.ownerId || (this.match.assistantIds || []).includes(a.playerId)) ? 1 : 0;
+        const bProtected = (b.playerId === this.match.ownerId || (this.match.assistantIds || []).includes(b.playerId)) ? 1 : 0;
+        if (aProtected !== bProtected) return bProtected - aProtected;
+        
+        const priority = { confirmed: 3, screenshot_uploaded: 2, pending_screenshot: 1 };
+        const aPri = priority[a.status] || 0;
+        const bPri = priority[b.status] || 0;
+        if (aPri !== bPri) return bPri - aPri;
+        
+        return a.originalIndex - b.originalIndex;
+      });
+      
+      return regs.map(r => r.playerId).map(id => this.players[id]).filter(Boolean);
     },
+
     teamA() {
       if (!this.match) return [];
       return (this.match.teamA?.players || []).map(id => this.players[id]).filter(Boolean);
@@ -156,10 +180,8 @@ export default {
   methods: {
     async checkAdmin() {
       try {
-        const { result } = await wx.cloud.callFunction({ name: 'getAdmins' });
-        const adminIds = result.admins || [];
-        const { OPENID } = await wx.cloud.callFunction({ name: 'login' }).then(r => r.result);
-        this.isAdmin = adminIds.includes(OPENID);
+        const { result } = await wx.cloud.callFunction({ name: 'login' });
+        this.isAdmin = result.isAdmin || result.isSuperAdmin || false;
       } catch (e) {
         this.isAdmin = false;
       }
@@ -169,81 +191,86 @@ export default {
       try {
         const { data } = await db.collection('matches').doc(this.matchId).get();
         this.match = data;
-        const playerIds = [...new Set(data.registrations.map(r => r.playerId))];
+        
+        // 必须创建新对象来触发 Vue 2 响应式更新
+        const playersMap = {};
+        
+        // 加载正式球员信息（通过云函数绕过权限限制）
+        const playerIds = [...new Set((data.registrations || []).map(r => r.playerId).filter(id => !id.startsWith('temp_')))];
         if (playerIds.length > 0) {
-          const { data: pList } = await db.collection('players').where({ _id: _.in(playerIds) }).get();
-          pList.forEach(p => { this.players[p._id] = p; });
+          const { result } = await wx.cloud.callFunction({ name: 'getPlayers' });
+          const allPlayers = result.players || [];
+          allPlayers.forEach(p => {
+            if (playerIds.includes(p._id)) {
+              playersMap[p._id] = p;
+            }
+          });
         }
+        
+        // 注入临时球员信息
+        (data.registrations || []).forEach(r => {
+          if (r.isTempPlayer || (r.playerId && r.playerId.startsWith('temp_'))) {
+            playersMap[r.playerId] = {
+              _id: r.playerId,
+              nickname: r.tempNickname || '临时球员',
+              positions: r.tempPositions || [],
+              height: '', weight: '', birthDate: '',
+              stats: { rating: 5 }
+            };
+          }
+        });
+        
+        // 整体替换触发响应式
+        this.players = playersMap;
       } catch (e) { console.error(e); }
       wx.hideLoading();
     },
+    getRating(p) { return p?.stats?.rating || 5; },
+    getAge(p) {
+      if (!p?.birthDate) return 30;
+      try {
+        const birth = new Date(p.birthDate + '-01');
+        return new Date().getFullYear() - birth.getFullYear();
+      } catch (e) { return 30; }
+    },
+    getHeight(p) { return p?.height ? parseFloat(p.height) : 0; },
+    getWeight(p) { return p?.weight ? parseFloat(p.weight) : 0; },
     avgRating(team) {
       if (team.length === 0) return 0;
-      return team.reduce((s, p) => s + (p.stats?.rating || 5), 0) / team.length;
+      return team.reduce((s, p) => s + this.getRating(p), 0) / team.length;
     },
     avgAge(team) {
       if (team.length === 0) return 0;
-      return team.reduce((s, p) => s + this.calcAge(p), 0) / team.length;
-    },
-    calcAge(player) {
-      if (!player?.birthDate) return 30;
-      const birth = new Date(player.birthDate + '-01');
-      const now = new Date();
-      return now.getFullYear() - birth.getFullYear();
+      return team.reduce((s, p) => s + this.getAge(p), 0) / team.length;
     },
     avgHeight(team) {
-      if (team.length === 0) return 0;
-      const heights = team.filter(p => p.height).map(p => parseFloat(p.height));
+      const heights = team.map(p => this.getHeight(p)).filter(h => h > 0);
       if (heights.length === 0) return 0;
       return heights.reduce((s, h) => s + h, 0) / heights.length;
     },
     avgWeight(team) {
-      if (team.length === 0) return 0;
-      const weights = team.filter(p => p.weight).map(p => parseFloat(p.weight));
+      const weights = team.map(p => this.getWeight(p)).filter(w => w > 0);
       if (weights.length === 0) return 0;
       return weights.reduce((s, w) => s + w, 0) / weights.length;
     },
-    heightDiff(teamA, teamB) {
-      return Math.abs(this.avgHeight(teamA) - this.avgHeight(teamB));
-    },
-    weightDiff(teamA, teamB) {
-      return Math.abs(this.avgWeight(teamA) - this.avgWeight(teamB));
-    },
     getPositionCategory(player) {
+      // 优先使用首选位置
+      const preferred = player?.preferredPosition;
+      if (preferred) {
+        if (preferred === 'GK') return 'GK';
+        if (BACK_POSITIONS.includes(preferred)) return 'BACK';
+        if (MID_POSITIONS.includes(preferred)) return 'MID';
+        if (FRONT_POSITIONS.includes(preferred)) return 'FRONT';
+      }
       const positions = player?.positions || [];
       if (positions.includes('GK')) return 'GK';
-      const backPositions = ['CB', 'LB', 'RB', 'CDM'];
-      if (positions.some(p => backPositions.includes(p))) return 'BACK';
-      const midPositions = ['CM', 'CAM'];
-      if (positions.some(p => midPositions.includes(p))) return 'MID';
-      const frontPositions = ['LW', 'RW', 'ST', 'CF'];
-      if (positions.some(p => frontPositions.includes(p))) return 'FRONT';
-      return 'BACK';
+      if (positions.some(p => BACK_POSITIONS.includes(p))) return 'BACK';
+      if (positions.some(p => MID_POSITIONS.includes(p))) return 'MID';
+      if (positions.some(p => FRONT_POSITIONS.includes(p))) return 'FRONT';
+      return 'BACK'; // 默认后场
     },
-    countByPosition(team) {
-      return {
-        GK: team.filter(p => this.getPositionCategory(p) === 'GK').length,
-        BACK: team.filter(p => this.getPositionCategory(p) === 'BACK').length,
-        MID: team.filter(p => this.getPositionCategory(p) === 'MID').length,
-        FRONT: team.filter(p => this.getPositionCategory(p) === 'FRONT').length,
-      };
-    },
-    positionScoreDiff(teamA, teamB) {
-      const a = this.countByPosition(teamA);
-      const b = this.countByPosition(teamB);
-      // 理想比例 BACK:MID:FRONT = 2:2:1, GK 各1
-      // 计算两队位置偏差惩罚值
-      let penalty = 0;
-      // GK 偏差：各队1个最好
-      penalty += Math.abs(a.GK - b.GK) * 3;
-      // BACK 偏差：尽量均衡
-      penalty += Math.abs(a.BACK - b.BACK) * 1;
-      // MID 偏差
-      penalty += Math.abs(a.MID - b.MID) * 1;
-      // FRONT 偏差
-      penalty += Math.abs(a.FRONT - b.FRONT) * 1;
-      return penalty;
-    },
+    
+    
     async autoBalance() {
       const players = this.allRegistered;
       if (players.length < 2) {
@@ -251,111 +278,39 @@ export default {
         return;
       }
       
-      // 按评分从高到低排序
-      const sorted = [...players].sort((a, b) => (b.stats?.rating || 5) - (a.stats?.rating || 5));
+      // 按评分从高到低排序（蛇形分配：强球员分散到两队）
+      const sorted = [...players].sort((a, b) => this.getRating(b) - this.getRating(a));
       
       let teamA = [];
       let teamB = [];
       
-      // 1. 先分配门将（GK 各队尽量一个）
-      const gks = sorted.filter(p => this.getPositionCategory(p) === 'GK');
-      const others = sorted.filter(p => this.getPositionCategory(p) !== 'GK');
-      
-      // 有2个门将 → 每队1个
-      if (gks.length >= 2) {
-        teamA.push(gks[0]);
-        teamB.push(gks[1]);
-      } else if (gks.length === 1) {
-        teamA.push(gks[0]);
-      }
-      
-      // 2. 分配剩余球员
-      const remaining = others.concat(gks.length > 2 ? gks.slice(2) : []);
-      
-      for (const p of remaining) {
-        const aRating = this.avgRating(teamA);
-        const bRating = this.avgRating(teamB);
+      for (const player of sorted) {
         const aCount = teamA.length;
         const bCount = teamB.length;
-        const aHeight = this.avgHeight(teamA);
-        const bHeight = this.avgHeight(teamB);
-        const aWeight = this.avgWeight(teamA);
-        const bWeight = this.avgWeight(teamB);
         
-        // 人数差 >= 2 时，优先给人数少的队
-        if (aCount - bCount >= 2) {
-          teamB.push(p);
-          continue;
-        }
-        if (bCount - aCount >= 2) {
-          teamA.push(p);
-          continue;
-        }
-        
-        // 计算加入A队或B队后的评分差和位置差
-        const aScore = aRating * aCount + (p.stats?.rating || 5);
-        const bScore = bRating * bCount + (p.stats?.rating || 5);
-        const newARating = aCount === 0 ? (p.stats?.rating || 5) : aScore / (aCount + 1);
-        const newBRating = bCount === 0 ? (p.stats?.rating || 5) : bScore / (bCount + 1);
-        
-        // 位置均衡考虑
-        const posA = this.positionScoreDiff([...teamA, p], teamB);
-        const posB = this.positionScoreDiff(teamA, [...teamB, p]);
-        
-        // 身高体重均衡考虑
-        const heightA = this.heightDiff([...teamA, p], teamB);
-        const heightB = this.heightDiff(teamA, [...teamB, p]);
-        const weightA = this.weightDiff([...teamA, p], teamB);
-        const weightB = this.weightDiff(teamA, [...teamB, p]);
-        
-        // 综合得分：平均分低的队优先，但位置差、身高差、体重差不能太大
-        const ratingDiffA = Math.abs(newARating - bRating);
-        const ratingDiffB = Math.abs(aRating - newBRating);
-        
-        let preferA = false;
-        
-        // 优先给平均分低的队
-        if (aRating <= bRating) {
-          preferA = true;
+        // 绝对优先：人数少的一队
+        if (aCount < bCount) {
+          teamA.push(player);
+        } else if (bCount < aCount) {
+          teamB.push(player);
         } else {
-          preferA = false;
-        }
-        
-        // 但如果加入后会导致位置严重失衡，调整
-        if (posA > posB + 2) {
-          preferA = false;
-        } else if (posB > posA + 2) {
-          preferA = true;
-        }
-        
-        // 如果身高差过大，调整
-        if (heightA > heightB + 2) {
-          preferA = false;
-        } else if (heightB > heightA + 2) {
-          preferA = true;
-        }
-        
-        // 如果体重差过大，调整
-        if (weightA > weightB + 3) {
-          preferA = false;
-        } else if (weightB > weightA + 3) {
-          preferA = true;
-        }
-        
-        // 如果人数为奇数，尽量让平均分低的队多一人
-        const totalCount = teamA.length + teamB.length + 1;
-        if (totalCount % 2 === 1) {
-          if (aRating <= bRating && aCount <= bCount) {
-            preferA = true;
-          } else if (bRating < aRating && bCount <= aCount) {
-            preferA = false;
-          }
-        }
-        
-        if (preferA) {
-          teamA.push(p);
-        } else {
-          teamB.push(p);
+          // 人数相等时，比较综合因素
+          const aTotalRating = teamA.reduce((s, p) => s + this.getRating(p), 0);
+          const bTotalRating = teamB.reduce((s, p) => s + this.getRating(p), 0);
+          
+          // 考虑位置均衡
+          const playerPos = this.getPositionCategory(player);
+          const aHasPos = teamA.filter(p => this.getPositionCategory(p) === playerPos).length;
+          const bHasPos = teamB.filter(p => this.getPositionCategory(p) === playerPos).length;
+          
+          let preferA = aTotalRating <= bTotalRating;
+          
+          // 如果某队严重缺少该位置，优先给那队
+          if (aHasPos < bHasPos - 1) preferA = true;
+          else if (bHasPos < aHasPos - 1) preferA = false;
+          
+          if (preferA) teamA.push(player);
+          else teamB.push(player);
         }
       }
       
@@ -369,9 +324,9 @@ export default {
         players: teamB.map(p => p._id),
         captainId: '' 
       };
-      await this.saveTeams();
-      uni.showToast({ title: '已自动均衡' });
+      uni.showToast({ title: '已自动均衡，请保存', icon: 'none' });
     },
+    
     getFormation(team) {
       const rows = [];
       const gks = team.filter(p => this.getPositionCategory(p) === 'GK');
@@ -394,37 +349,23 @@ export default {
       this.match.teamB.captainId = this.teamB[idx]._id;
       this.match.teamB.captainIdx = idx;
     },
-    async clearTeams() {
+    clearTeams() {
       this.match.teamA = { ...this.match.teamA, players: [], captainId: '', captainIdx: -1 };
       this.match.teamB = { ...this.match.teamB, players: [], captainId: '', captainIdx: -1 };
-      await this.saveTeams();
     },
-    async moveToB(id) {
+    moveToB(id) {
       this.match.teamA.players = this.match.teamA.players.filter(pid => pid !== id);
       this.match.teamB.players.push(id);
-      await this.saveTeams();
     },
-    async moveToA(id) {
+    moveToA(id) {
       this.match.teamB.players = this.match.teamB.players.filter(pid => pid !== id);
       this.match.teamA.players.push(id);
-      await this.saveTeams();
     },
-    async assign(id, team) {
+    assign(id, team) {
       this.match.teamA.players = this.match.teamA.players.filter(pid => pid !== id);
       this.match.teamB.players = this.match.teamB.players.filter(pid => pid !== id);
       if (team === 'A') this.match.teamA.players.push(id);
       else this.match.teamB.players.push(id);
-      await this.saveTeams();
-    },
-    async saveTeams() {
-      await wx.cloud.callFunction({
-        name: 'updateMatch',
-        data: { matchId: this.matchId, updateData: {
-          'teamA.players': this.match.teamA.players,
-          'teamB.players': this.match.teamB.players,
-        } }
-      });
-      this.loadData();
     },
     async save() {
       wx.showLoading({ title: '保存中' });
@@ -440,7 +381,6 @@ export default {
             'teamB.players': this.match.teamB.players || []
           } }
         });
-        // 自动发送分队通知
         if (this.isAdmin) {
           try {
             await wx.cloud.callFunction({

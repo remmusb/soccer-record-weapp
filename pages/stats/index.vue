@@ -38,6 +38,8 @@ export default {
     return {
       players: [],
       completedMatches: [],
+      goalMap: {},
+      assistMap: {},
       collapsed: {
         scorers: false,
         assists: false,
@@ -56,45 +58,206 @@ export default {
       return this.completedMatches.reduce((s, m) => s + (m.teamA?.score || 0) + (m.teamB?.score || 0), 0);
     },
     topScorers() {
-      return [...this.players].sort((a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0)).slice(0, 10);
+      return [...this.players]
+        .filter(p => !p._id.startsWith('temp_'))
+        .map(p => ({ ...p, _liveGoals: this.goalMap[p._id] || 0 }))
+        .sort((a, b) => b._liveGoals - a._liveGoals)
+        .slice(0, 10);
     },
     topAssists() {
-      return [...this.players].sort((a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0)).slice(0, 10);
+      return [...this.players]
+        .map(p => ({ ...p, _liveAssists: this.assistMap[p._id] || 0 }))
+        .filter(p => p._liveAssists > 0)
+        .sort((a, b) => b._liveAssists - a._liveAssists)
+        .slice(0, 10);
     },
     topMVP() {
-      return [...this.players].sort((a, b) => (b.stats?.mvp || 0) - (a.stats?.mvp || 0)).slice(0, 10);
+      return [...this.players].filter(p => !p._id.startsWith('temp_')).sort((a, b) => (b.stats?.mvp || 0) - (a.stats?.mvp || 0)).slice(0, 10);
     },
     topOwners() {
-      return [...this.players].sort((a, b) => (b.stats?.ownerCount || 0) - (a.stats?.ownerCount || 0)).slice(0, 10);
+      const ownerMap = {};
+      for (const m of this.completedMatches) {
+        if (m.ownerId) ownerMap[m.ownerId] = (ownerMap[m.ownerId] || 0) + 1;
+      }
+      return [...this.players]
+        .filter(p => !p._id.startsWith('temp_'))
+        .map(p => ({ ...p, _liveOwnerCount: ownerMap[p._id] || 0 }))
+        .filter(p => p._liveOwnerCount > 0)
+        .sort((a, b) => b._liveOwnerCount - a._liveOwnerCount)
+        .slice(0, 10);
     },
     topAssistants() {
-      return [...this.players].sort((a, b) => (b.stats?.assistantCount || 0) - (a.stats?.assistantCount || 0)).slice(0, 10);
+      const assistantMap = {};
+      for (const m of this.completedMatches) {
+        for (const aid of (m.assistantIds || [])) {
+          if (aid) assistantMap[aid] = (assistantMap[aid] || 0) + 1;
+        }
+      }
+      return [...this.players]
+        .filter(p => !p._id.startsWith('temp_'))
+        .map(p => ({ ...p, _liveAssistantCount: assistantMap[p._id] || 0 }))
+        .filter(p => p._liveAssistantCount > 0)
+        .sort((a, b) => b._liveAssistantCount - a._liveAssistantCount)
+        .slice(0, 10);
     },
     topRated() {
       return [...this.players]
-        .filter(p => p.allowRating !== false)
-        .sort((a, b) => (b.stats?.rating || 5) - (a.stats?.rating || 5))
+        .filter(p => p.allowRating !== false && !p._id.startsWith('temp_'))
+        .map(p => {
+          // 筛选该球员实际参加的比赛
+          const playerMatches = this.completedMatches.filter(m => {
+            const inA = (m.teamA?.players || []).includes(p._id);
+            const inB = (m.teamB?.players || []).includes(p._id);
+            return inA || inB;
+          });
+          const rating = this.calculatePlayerRating(p, playerMatches);
+          return { 
+            ...p, 
+            _peerAvg: rating.peerAvg, 
+            _adminAvg: rating.adminAvg, 
+            _performanceRating: rating.performanceRating, 
+            _compositeRating: rating.compositeRating 
+          };
+        })
+        .sort((a, b) => b._compositeRating - a._compositeRating)
         .slice(0, 10);
     },
     sections() {
       return [
-        { key: 'scorers', icon: '🏆', title: '射手榜', data: this.topScorers, score: p => p.stats?.goals || 0, meta: p => `出场 ${p.stats?.appearances || 0}` },
-        { key: 'assists', icon: '🤝', title: '助攻榜', data: this.topAssists, score: p => p.stats?.assists || 0 },
+        { key: 'scorers', icon: '🏆', title: '射手榜', data: this.topScorers, score: p => p._liveGoals || 0, meta: p => `出场 ${p.stats?.appearances || 0}` },
+        { key: 'assists', icon: '🤝', title: '助攻榜', data: this.topAssists, score: p => p._liveAssists || 0 },
         { key: 'mvp', icon: '⭐', title: 'MVP榜', data: this.topMVP, score: p => p.stats?.mvp || 0 },
-        { key: 'owners', icon: '👑', title: '场主榜', data: this.topOwners, score: p => p.stats?.ownerCount || 0 },
-        { key: 'assistants', icon: '🛡️', title: '护法榜', data: this.topAssistants, score: p => p.stats?.assistantCount || 0 },
-        { key: 'rated', icon: '⭐', title: '评分榜', data: this.topRated, score: p => (p.stats?.rating || 5).toFixed(1) },
+        { key: 'owners', icon: '👑', title: '场主榜', data: this.topOwners, score: p => p._liveOwnerCount || 0 },
+        { key: 'assistants', icon: '🛡️', title: '护法榜', data: this.topAssistants, score: p => p._liveAssistantCount || 0 },
+        { key: 'rated', icon: '⭐', title: '评分榜', data: this.topRated, score: p => (p._compositeRating || 5).toFixed(1) },
       ];
     }
   },
   methods: {
+    // 评分计算函数（与 detail.vue / list.vue 完全一致）
+    calculatePlayerRating(player, completedMatches) {
+      const playerId = player._id;
+      const FRONT_POSITIONS = ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];
+      const BACK_POSITIONS = ['GK', 'CB', 'LB', 'RB', 'CDM'];
+      
+      let winPoints = 0, teamMatches = 0, yellowCount = 0, redCount = 0;
+      let goals = 0, assists = 0;
+
+      for (const m of completedMatches) {
+        const inTeamA = (m.teamA?.players || []).includes(playerId);
+        const inTeamB = (m.teamB?.players || []).includes(playerId);
+        if (!inTeamA && !inTeamB) continue;
+
+        teamMatches++;
+        const aScore = m.teamA?.score || 0;
+        const bScore = m.teamB?.score || 0;
+        if (inTeamA) {
+          if (aScore > bScore) winPoints += 3;
+          else if (aScore === bScore) winPoints += 1;
+        } else {
+          if (bScore > aScore) winPoints += 3;
+          else if (bScore === aScore) winPoints += 1;
+        }
+
+        for (const e of (m.events || [])) {
+          if (e.playerId === playerId) {
+            if (e.type === 'goal') goals++;
+            if (e.type === 'yellow') yellowCount++;
+            if (e.type === 'red') redCount++;
+          }
+          if (e.type === 'goal' && e.assistById === playerId) {
+            assists++;
+          }
+        }
+      }
+
+      const isFront = player.positions?.some(pos => FRONT_POSITIONS.includes(pos));
+      const isBack = player.positions?.some(pos => BACK_POSITIONS.includes(pos));
+
+      let performanceRating = 5;
+      if (teamMatches > 0) {
+        const winRate = winPoints / (teamMatches * 3);
+        const goalRate = Math.min(goals / teamMatches, 2);
+        const assistRate = Math.min(assists / teamMatches, 2);
+        const cardPenalty = (redCount * 1 + yellowCount * 0.3) / teamMatches;
+
+        if (isFront) {
+          performanceRating = 5 + winRate * 2 + goalRate * 1.5 + assistRate * 1 - cardPenalty;
+        } else if (isBack) {
+          performanceRating = 5 + winRate * 3 - cardPenalty * 0.5;
+        } else {
+          performanceRating = 5 + winRate * 2 + goalRate * 1 + assistRate * 0.5 - cardPenalty;
+        }
+        performanceRating = Math.min(10, Math.max(1, Math.round(performanceRating * 10) / 10));
+      }
+
+      const validMatchIds = new Set(completedMatches.map(m => m._id));
+      const ratings = player.ratings || {};
+      const peerRatings = (ratings.peerRatings || []).filter(r => validMatchIds.has(r.matchId));
+      const adminRatings = (ratings.adminRatings || []).filter(r => validMatchIds.has(r.matchId));
+      const initialRating = (typeof ratings.initialRating === 'number') ? ratings.initialRating : 5;
+
+      const peerAvg = peerRatings.length > 0
+        ? peerRatings.reduce((s, r) => s + r.score, 0) / peerRatings.length
+        : initialRating;
+      const adminAvg = adminRatings.length > 0
+        ? adminRatings.reduce((s, r) => s + r.score, 0) / adminRatings.length
+        : initialRating;
+
+      let compositeRating = peerAvg * 0.5 + adminAvg * 0.3 + performanceRating * 0.2;
+      compositeRating = Math.min(10, Math.max(1, Math.round(compositeRating * 10) / 10));
+
+      return {
+        compositeRating,
+        peerAvg,
+        adminAvg,
+        performanceRating,
+        teamMatches,
+        winPoints,
+        goals,
+        assists,
+        yellowCount,
+        redCount,
+        peerCount: peerRatings.length,
+        adminCount: adminRatings.length
+      };
+    },
     async loadData() {
       wx.showLoading({ title: '加载中' });
       try {
-        const playersRes = await db.collection('players').get();
-        const matchesRes = await db.collection('matches').where({ status: 'completed' }).get();
-        this.players = playersRes.data;
+        const { result: playerResult } = await wx.cloud.callFunction({ name: 'getPlayers' });
+        this.players = playerResult.players || [];
+        const matchesRes = await db.collection('matches').where({ status: 'completed' }).limit(100).get();
         this.completedMatches = matchesRes.data;
+
+        // 实时计算进球和助攻
+        const goalMap = {};
+        const assistMap = {};
+        for (const m of this.completedMatches) {
+          for (const e of (m.events || [])) {
+            if (e.type === 'goal' && e.playerId) {
+              goalMap[e.playerId] = (goalMap[e.playerId] || 0) + 1;
+            }
+            // 只统计进球事件中的助攻者（assistById），与 detail.vue 一致
+            if (e.type === 'goal' && e.assistById) {
+              assistMap[e.assistById] = (assistMap[e.assistById] || 0) + 1;
+            }
+          }
+        }
+        this.goalMap = goalMap;
+        this.assistMap = assistMap;
+
+        // 对目标球员直接查询数据库，确保数据与detail.vue一致
+        try {
+          const { data } = await db.collection('players').doc('ac938a9e6a45f32a01117cff57b02a65').get();
+          // 替换players数组中的目标球员数据
+          const idx = this.players.findIndex(p => p._id === 'ac938a9e6a45f32a01117cff57b02a65');
+          if (idx >= 0) {
+            this.players[idx] = data;
+          }
+        } catch (e) {
+          console.log('目标球员直接查询失败');
+        }
       } catch (e) {
         console.error('加载失败', e);
       }

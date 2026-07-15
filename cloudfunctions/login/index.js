@@ -40,10 +40,22 @@ exports.main = async (event, context) => {
     }
   }
   
+  // 检查是否是高级管理员
+  let isSuperAdmin = false;
+  if (isAdmin) {
+    const adminRecord = await db.collection('admins').where(
+      playerId ? { playerId } : { openid: OPENID }
+    ).get();
+    if (adminRecord.data.length > 0 && adminRecord.data[0].role === 'super_admin') {
+      isSuperAdmin = true;
+    }
+  }
+  
   return { 
     openid: OPENID, 
     playerId,
     isPlayer: player.data.length > 0,
-    isAdmin
+    isAdmin,
+    isSuperAdmin
   };
 };

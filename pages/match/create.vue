@@ -156,7 +156,7 @@ export default {
       form: {
         title: '',
         date: '',
-        time: '20:00',
+        time: '18:30',
         endTime: '',
         location: '',
         latitude: null,
@@ -204,7 +204,7 @@ export default {
     async checkAdmin() {
       try {
         const { result } = await wx.cloud.callFunction({ name: 'login' });
-        this.isAdmin = result.isAdmin || false;
+        this.isAdmin = result.isAdmin || result.isSuperAdmin || false;
       } catch (e) {
         this.isAdmin = false;
       }
@@ -248,6 +248,7 @@ export default {
     },
     initDate() {
       const d = new Date();
+      d.setDate(d.getDate() + 13);
       this.form.date = d.toISOString().split('T')[0];
       this.calcScreenshotDeadline();
     },
@@ -280,14 +281,17 @@ export default {
           if (err.errMsg && err.errMsg.includes('cancel')) return;
           console.error('地图选点失败', err);
           let msg = '地图选点失败';
-          if (err.errMsg && err.errMsg.includes('auth')) {
-            msg = '请在设置中开启位置权限';
+          let extra = '';
+          if (err.errMsg && (err.errMsg.includes('auth deny') || err.errMsg.includes('authorize'))) {
+            msg = '位置权限未开启';
+            extra = '请在手机设置中允许小程序使用位置权限';
           } else if (err.errMsg && err.errMsg.includes('permission')) {
             msg = '小程序未开通地理位置接口';
+            extra = '需在小程序后台「开发管理→接口设置」中申请开通「获取用户位置信息」接口，审核通过后即可使用';
           }
           uni.showModal({
-            title: '地图选点失败',
-            content: msg + '，您可以手动输入地点',
+            title: msg,
+            content: (extra ? extra + '。' : '') + '您也可以直接手动输入地点',
             showCancel: false,
             confirmText: '手动输入'
           });

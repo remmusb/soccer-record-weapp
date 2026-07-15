@@ -106,35 +106,55 @@
         </view>
         <view class="form-item">
           <text class="label">生日</text>
-          <picker mode="date" :value="form.birthDate" @change="onBirthDateChange">
+          <picker mode="date" fields="month" :value="form.birthDate" @change="onBirthDateChange">
             <view class="picker">{{ form.birthDate || '请选择生日' }}</view>
           </picker>
+          <view class="privacy-toggle" @click="form.hideBirthDate = !form.hideBirthDate">
+            <text :class="{'selected': form.hideBirthDate}">{{form.hideBirthDate ? '✅ 已设置：不在个人页面显示年龄' : '☐ 不在个人页面显示年龄'}}</text>
+          </view>
         </view>
         <view class="form-item">
           <text class="label">擅长位置（可多选）</text>
           <view class="position-tags">
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('GK') }" @click="togglePosition('GK')">🧤 门将</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('CB') }" @click="togglePosition('CB')">🛡️ 中后卫</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('LB') }" @click="togglePosition('LB')">⬅️ 左后卫</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('RB') }" @click="togglePosition('RB')">➡️ 右后卫</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('CDM') }" @click="togglePosition('CDM')">⚓ 后腰</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('CM') }" @click="togglePosition('CM')">⚙️ 中场</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('CAM') }" @click="togglePosition('CAM')">🎨 前腰</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('LW') }" @click="togglePosition('LW')">↖️ 左边锋</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('RW') }" @click="togglePosition('RW')">↗️ 右边锋</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('ST') }" @click="togglePosition('ST')">⚽ 前锋</view>
-            <view class="position-tag" :class="{ active: (form.positions || []).includes('CF') }" @click="togglePosition('CF')">🎯 中锋</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('GK'), preferred: form.preferredPosition === 'GK' }" @click="togglePosition('GK')">🧤 门将</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('CB'), preferred: form.preferredPosition === 'CB' }" @click="togglePosition('CB')">🛡️ 中后卫</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('LB'), preferred: form.preferredPosition === 'LB' }" @click="togglePosition('LB')">⬅️ 左后卫</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('RB'), preferred: form.preferredPosition === 'RB' }" @click="togglePosition('RB')">➡️ 右后卫</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('CDM'), preferred: form.preferredPosition === 'CDM' }" @click="togglePosition('CDM')">⚓ 后腰</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('CM'), preferred: form.preferredPosition === 'CM' }" @click="togglePosition('CM')">⚙️ 中场</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('CAM'), preferred: form.preferredPosition === 'CAM' }" @click="togglePosition('CAM')">🎨 前腰</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('LW'), preferred: form.preferredPosition === 'LW' }" @click="togglePosition('LW')">↖️ 左边锋</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('RW'), preferred: form.preferredPosition === 'RW' }" @click="togglePosition('RW')">↗️ 右边锋</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('ST'), preferred: form.preferredPosition === 'ST' }" @click="togglePosition('ST')">⚽ 前锋</view>
+            <view class="position-tag" :class="{ active: (form.positions || []).includes('CF'), preferred: form.preferredPosition === 'CF' }" @click="togglePosition('CF')">🎯 中锋</view>
           </view>
           <text v-if="form.positions && form.positions.length > 0" style="font-size:22rpx;color:#667eea;margin-top:8rpx">已选: {{ form.positions.join('、') }}</text>
+        </view>
+        <view class="form-item" v-if="form.positions && form.positions.length > 0">
+          <text class="label">首选位置（自动分队优先参考）</text>
+          <picker mode="selector" :range="POSITIONS.filter(p => form.positions.includes(p.id)).map(p => p.icon + ' ' + p.name)" :value="0" @change="onPreferredPositionChange">
+            <view class="picker">
+              <text :class="{'picker-placeholder': !form.preferredPosition}">
+                {{form.preferredPosition ? (POSITIONS.find(p => p.id === form.preferredPosition)?.icon + ' ' + POSITIONS.find(p => p.id === form.preferredPosition)?.name) : '选择首选位置'}}
+              </text>
+              <text>▼</text>
+            </view>
+          </picker>
         </view>
         <view class="form-row">
           <view class="form-group" style="flex:1">
             <text class="label">身高(cm)</text>
             <input v-model="form.height" placeholder="170" type="number" />
+            <view class="privacy-toggle" @click="form.hideHeight = !form.hideHeight">
+              <text :class="{'selected': form.hideHeight}">{{form.hideHeight ? '✅ 已隐藏' : '☐ 隐藏'}}</text>
+            </view>
           </view>
           <view class="form-group" style="flex:1;margin-left:20rpx">
             <text class="label">体重(kg)</text>
             <input v-model="form.weight" placeholder="70" type="number" />
+            <view class="privacy-toggle" @click="form.hideWeight = !form.hideWeight">
+              <text :class="{'selected': form.hideWeight}">{{form.hideWeight ? '✅ 已隐藏' : '☐ 隐藏'}}</text>
+            </view>
           </view>
         </view>
         <view class="form-item">
@@ -144,6 +164,13 @@
             <view class="foot-option" :class="{selected: form.foot === '右脚'}" @click="form.foot = '右脚'">右脚</view>
             <view class="foot-option" :class="{selected: form.foot === '左右脚'}" @click="form.foot = '左右脚'">左右脚</view>
           </view>
+          <view class="privacy-toggle" @click="form.hideFoot = !form.hideFoot">
+            <text :class="{'selected': form.hideFoot}">{{form.hideFoot ? '✅ 已隐藏' : '☐ 隐藏'}}</text>
+          </view>
+        </view>
+        <view class="form-item">
+          <text class="label">康体通后四位</text>
+          <input v-model="form.kttLast4" placeholder="后四位" maxlength="4" type="number" />
         </view>
         <view class="form-item">
           <text class="label">允许他人评分</text>
@@ -246,6 +273,7 @@ const POSITIONS = [
 export default {
   data() {
     return {
+      POSITIONS,
       user: {},
       form: {
         nickname: '',
@@ -311,11 +339,17 @@ export default {
       this.$set(this.form, 'name', this.user.name || '');
       this.$set(this.form, 'avatarUrl', this.user.avatarUrl || this.user.avatar || '');
       this.$set(this.form, 'birthDate', this.user.birthDate || '');
+      this.$set(this.form, 'hideBirthDate', this.user.hideBirthDate || false);
       this.$set(this.form, 'positions', [...(this.user.positions || [])]);
+      this.$set(this.form, 'preferredPosition', this.user.preferredPosition || '');
       this.$set(this.form, 'allowRating', this.user.allowRating !== false);
       this.$set(this.form, 'height', this.user.height || '');
+      this.$set(this.form, 'hideHeight', this.user.hideHeight || false);
       this.$set(this.form, 'weight', this.user.weight || '');
+      this.$set(this.form, 'hideWeight', this.user.hideWeight || false);
       this.$set(this.form, 'foot', this.user.foot || '');
+      this.$set(this.form, 'hideFoot', this.user.hideFoot || false);
+      this.$set(this.form, 'kttLast4', this.user.kttLast4 || '');
       this.editing = true;
     },
 
@@ -361,10 +395,16 @@ export default {
             nickname: this.form.nickname.trim(),
             avatar: this.form.avatarUrl || '',
             birthDate: this.form.birthDate || '',
+            hideBirthDate: this.form.hideBirthDate || false,
             height: this.form.height || '',
+            hideHeight: this.form.hideHeight || false,
             weight: this.form.weight || '',
+            hideWeight: this.form.hideWeight || false,
             foot: this.form.foot || '',
+            hideFoot: this.form.hideFoot || false,
+            kttLast4: this.form.kttLast4 || '',
             positions: this.form.positions || [],
+            preferredPosition: this.form.preferredPosition || '',
             allowRating: this.form.allowRating !== false
           }
         });
@@ -508,9 +548,17 @@ export default {
       const index = this.form.positions.indexOf(pos);
       if (index > -1) {
         this.form.positions.splice(index, 1);
+        if (this.form.preferredPosition === pos) {
+          this.form.preferredPosition = '';
+        }
       } else {
         this.form.positions.push(pos);
       }
+    },
+
+    onPreferredPositionChange(e) {
+      const selected = POSITIONS.filter(p => this.form.positions.includes(p.id))[e.detail.value];
+      if (selected) this.form.preferredPosition = selected.id;
     },
 
     goSettings() {
@@ -850,4 +898,12 @@ input,
 .agreement-checkbox { font-size: 36rpx; flex-shrink: 0; }
 .agreement-text { font-size: 24rpx; color: #666; line-height: 1.5; }
 .agreement-link { color: #667eea; }
+
+/* 隐私开关 */
+.privacy-toggle { margin-top: 12rpx; padding: 16rpx; border-radius: 12rpx; background: #f3f4f6; font-size: 26rpx; color: #6b7280; }
+.privacy-toggle text.selected { color: #667eea; }
+
+/* 首选位置标记 */
+.position-tag.preferred { background: #fef3c7; border-color: #f59e0b; color: #f59e0b; }
+.picker-placeholder { color: #9ca3af; }
 </style>

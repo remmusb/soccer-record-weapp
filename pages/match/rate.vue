@@ -57,6 +57,27 @@
       </view>
     </view>
 
+    <!-- 互评记录（高级管理员可见） -->
+    <view class="card" v-if="isSuperAdmin && allPeerRatings.length > 0">
+      <view class="section-header" @click="showPeerRatings = !showPeerRatings">
+        <view class="section-title">📋 互评记录</view>
+        <text class="collapse-arrow">{{showPeerRatings ? '▲' : '▼'}}</text>
+      </view>
+      <view v-if="showPeerRatings">
+        <view class="peer-rating-summary">共 {{allPeerRatings.length}} 条互评</view>
+        <view v-for="group in groupedPeerRatings" :key="group.toId">
+          <view class="peer-group-header">👤 {{group.toName}}</view>
+          <view class="peer-rating-list">
+            <view class="peer-rating-item" v-for="r in group.items" :key="r.fromId">
+              <view class="peer-rating-from">{{r.fromName}}</view>
+              <text class="peer-rating-arrow">→</text>
+              <view class="peer-rating-score">{{r.score}}分</view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <!-- 无权限提示 -->
     <view class="card" v-if="!isPlayer && !isAdmin">
       <view class="no-permission">
@@ -93,8 +114,12 @@ export default {
       openid: '',
       currentPlayerId: '',
       isAdmin: false,
+      isSuperAdmin: false,
       peerScores: {},
       adminScores: {},
+      // 管理员查看互评记录
+      allPeerRatings: [],
+      showPeerRatings: false,
     }
   },
   onLoad(options) {
@@ -104,32 +129,32 @@ export default {
   computed: {
     allPlayers() {
       if (!this.match) return [];
-      // 排除临时队员和未确认球员
+      // 排除临时队员（isTempPlayer 或 playerId 以 temp_ 开头）和未确认球员
       const tempIds = new Set((this.match.registrations || [])
-        .filter(r => r.isTempPlayer)
+        .filter(r => r.isTempPlayer || (r.playerId && r.playerId.startsWith('temp_')))
         .map(r => r.playerId));
       // 名单中所有已确认（confirmed）球员 + 分队球员 + 赛况球员
       const ids = [...new Set([
         ...((this.match.registrations || [])
-          .filter(r => !r.isTempPlayer && r.status === 'confirmed')
+          .filter(r => !r.isTempPlayer && !(r.playerId && r.playerId.startsWith('temp_')) && r.status === 'confirmed')
           .map(r => r.playerId)),
         ...(this.match.teamA?.players || []),
         ...(this.match.teamB?.players || []),
         ...((this.match.events || []).map(e => e.playerId))
-      ].filter(id => !tempIds.has(id) && id))];
+      ].filter(id => id && !id.startsWith('temp_') && !tempIds.has(id)))];
       const players = ids.map(id => this.players[id]).filter(Boolean);
       return players;
     },
     teammates() {
       // 只显示允许评分的队友（管理员除外）
-      return this.allPlayers.filter(p => p._id !== this.currentPlayerId && p.allowRating !== false);
+      return this.allPlayers.filter(p => p._id !== this.currentPlayerId && p.allowRating !== false && !p._id.startsWith('temp_'));
     },
     isPlayer() {
       // 只有已确认报名（confirmed）的非临时球员才能评分
       const confirmedIds = (this.match.registrations || [])
-        .filter(r => !r.isTempPlayer && r.status === 'confirmed')
+        .filter(r => !r.isTempPlayer && !(r.playerId && r.playerId.startsWith('temp_')) && r.status === 'confirmed')
         .map(r => r.playerId);
-      return confirmedIds.includes(this.currentPlayerId);
+      return confirmedIds.includes(this.currentPlayerId) && !this.currentPlayerId.startsWith('temp_');
     },
     isRateWindowOpen() {
       // 评分窗口由管理员控制开关
@@ -138,6 +163,17 @@ export default {
     rateWindowStatus() {
       if (!this.match?.ratingOpen) return '评分窗口已关闭（管理员未开启）';
       return '评分窗口开放中';
+    },
+    // 按被评人分组的互评记录
+    groupedPeerRatings() {
+      const groups = {};
+      for (const r of this.allPeerRatings) {
+        if (!groups[r.toId]) {
+          groups[r.toId] = { toId: r.toId, toName: r.toName, items: [] };
+        }
+        groups[r.toId].items.push(r);
+      }
+      return Object.values(groups);
     }
   },
   methods: {
@@ -147,6 +183,7 @@ export default {
         const { result } = await wx.cloud.callFunction({ name: 'login' });
         this.openid = result.openid;
         this.isAdmin = result.isAdmin;
+        this.isSuperAdmin = result.isSuperAdmin || false;
         this.currentPlayerId = result.playerId || '';
 
         const { data } = await db.collection('matches').doc(this.matchId).get();
@@ -215,6 +252,36 @@ export default {
           }
           this.peerScores = peerScores;
           this.adminScores = adminScores;
+
+          // 管理员：收集本场比赛所有互评记录（去重：按fromId+toId只保留最新）
+          if (this.isAdmin) {
+            const peerMap = new Map();
+            for (const p of Object.values(newPlayers)) {
+              const peerList = p.ratings?.peerRatings || [];
+              for (const r of peerList) {
+                if (r.matchId === this.matchId && r.fromId && r.score > 0) {
+                  const key = r.fromId + '_' + p._id;
+                  const existing = peerMap.get(key);
+                  if (!existing || (r.createdAt && existing.createdAt && r.createdAt > existing.createdAt)) {
+                    peerMap.set(key, {
+                      fromId: r.fromId,
+                      fromName: newPlayers[r.fromId]?.nickname || '未知',
+                      toId: p._id,
+                      toName: p.nickname || '未知',
+                      score: r.score,
+                      createdAt: r.createdAt
+                    });
+                  }
+                }
+              }
+            }
+            // 按被评人(toId)排序，再按评分人(fromId)排序
+            const allPeer = Array.from(peerMap.values()).sort((a, b) => {
+              if (a.toId !== b.toId) return a.toId.localeCompare(b.toId);
+              return a.fromId.localeCompare(b.fromId);
+            });
+            this.allPeerRatings = allPeer;
+          }
         }
       } catch (e) { console.error(e); }
       wx.hideLoading();
@@ -319,4 +386,15 @@ export default {
 .btn-primary { background: #16a34a; color: #fff; border-radius: 16rpx; padding: 28rpx 0; text-align: center; font-weight: 600; font-size: 32rpx; }
 
 .submit-summary { font-size: 26rpx; color: #6b7280; text-align: center; margin-top: 16rpx; }
+
+/* 互评记录 */
+.section-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+.collapse-arrow { font-size: 28rpx; color: #9ca3af; }
+.peer-rating-summary { font-size: 24rpx; color: #6b7280; margin-bottom: 16rpx; }
+.peer-group-header { font-size: 28rpx; font-weight: 700; color: #1e293b; padding: 12rpx 0; background: #f1f5f9; margin-top: 8rpx; }
+.peer-rating-list { display: flex; flex-direction: column; gap: 12rpx; }
+.peer-rating-item { display: flex; align-items: center; gap: 12rpx; padding: 12rpx 16rpx; background: #f8fafc; border-radius: 12rpx; }
+.peer-rating-from { font-size: 26rpx; font-weight: 600; color: #1e40af; min-width: 100rpx; }
+.peer-rating-arrow { font-size: 24rpx; color: #9ca3af; }
+.peer-rating-score { font-size: 28rpx; font-weight: 700; color: #f59e0b; }
 </style>

@@ -52,7 +52,8 @@ exports.main = async (event, context) => {
         isDeadlinePassed = now >= deadline;
       }
       
-      const status = (match.needScreenshot === false || isDeadlinePassed) ? 'confirmed' : 'pending_screenshot';
+      // 只有不需要抽场的比赛才自动确认；需要抽场的比赛报名后状态为 pending_screenshot
+      const status = (match.needScreenshot === false) ? 'confirmed' : 'pending_screenshot';
       
       registrations.push({
         playerId: targetId,

@@ -30,11 +30,15 @@
         "usingComponents" : true,
         "cloudfunctionRoot" : "cloudfunctions/",
         "lazyCodeLoading" : "requiredComponents",
+        "optimization" : {
+            "subPackages" : true
+        },
         "permission" : {
             "scope.userLocation" : {
-                "desc" : "获取位置用于显示球场地点"
+                "desc" : "获取位置用于在地图中选择球场地点"
             }
-        }
+        },
+        "requiredPrivateInfos": ["chooseLocation"]
     },
     "mp-alipay" : {
         "usingComponents" : true

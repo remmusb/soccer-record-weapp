@@ -22,37 +22,42 @@ function isBackline(player) {
 exports.main = async (event, context) => {
   try {
     const { data: players } = await db.collection('players').get();
-    const { data: matches } = await db.collection('matches').where({ status: 'completed' }).get();
+    const { data: allMatches } = await db.collection('matches').get();
+    const completedMatches = allMatches.filter(m => m.status === 'completed');
     
     // 收集所有有效的 completed 比赛 matchId，用于过滤评分
-    const validMatchIds = new Set(matches.map(m => m._id));
+    const validMatchIds = new Set(completedMatches.map(m => m._id));
+    
     
     const statsMap = {};
     players.forEach(p => {
       statsMap[p._id] = {
         appearances: 0, goals: 0, assists: 0, wins: 0, draws: 0, losses: 0,
-        yellowCards: 0, redCards: 0, ownGoals: 0, mvp: 0
+        yellowCards: 0, redCards: 0, ownGoals: 0, mvp: 0,
+        ownerCount: 0, assistantCount: 0
       };
     });
 
-    // 获取所有球员的评分数据，用于MVP计算
+    // 构建球员评分映射，直接使用已获取的 players 数据，避免 N 次 doc().get()
     const playerRatingsMap = {};
     for (const p of players) {
-      const playerDoc = await db.collection('players').doc(p._id).get();
-      const ratings = (playerDoc.data || {}).ratings || {};
+      const ratings = p.ratings || {};
       playerRatingsMap[p._id] = {
         peerRatings: (ratings.peerRatings || []).filter(r => validMatchIds.has(r.matchId)),
         adminRatings: (ratings.adminRatings || []).filter(r => validMatchIds.has(r.matchId)),
-        initialRating: ratings.initialRating || 5
+        initialRating: (typeof ratings.initialRating === 'number') ? ratings.initialRating : 5
       };
     }
 
-    for (const m of matches) {
+    for (const m of allMatches) {
       if (m.ownerId && statsMap[m.ownerId]) statsMap[m.ownerId].ownerCount++;
       const assistantIds = m.assistantIds || [];
       assistantIds.forEach(id => {
         if (id && statsMap[id]) statsMap[id].assistantCount++;
       });
+
+      // 只有已结束的比赛才统计比赛数据（出场、进球、胜负、MVP等）
+      if (m.status !== 'completed') continue;
 
       const confirmed = (m.registrations || []).filter(r => r.status === 'confirmed' && !r.isTempPlayer);
       const registeredIds = confirmed.map(r => r.playerId);
@@ -108,21 +113,25 @@ exports.main = async (event, context) => {
       
       // 计算该场比赛的 MVP
       const mvpIds = calculateMVP(matchPlayerStats);
+      // MVP 已在评分关闭时计算并写入 matches，此处跳过重复更新以优化性能
+      // 如需实时重新计算 MVP，可取消下方注释
+      /*
       if (mvpIds.length > 0) {
-        // 更新比赛的 MVP 字段
         await db.collection('matches').doc(m._id).update({
           data: { mvp: mvpIds }
         });
-        // 累计每个 MVP 球员的 MVP 次数
-        for (const mvpId of mvpIds) {
-          if (statsMap[mvpId]) statsMap[mvpId].mvp++;
-        }
+      }
+      */
+      // 累计每个 MVP 球员的 MVP 次数
+      for (const mvpId of mvpIds) {
+        if (statsMap[mvpId]) statsMap[mvpId].mvp++;
       }
     }
 
     const results = [];
 
     // 计算比赛表现分 (performanceRating) - 20% 权重
+    const updatePromises = [];
     for (const p of players) {
       const s = statsMap[p._id];
       const total = s.appearances || 1;
@@ -141,21 +150,14 @@ exports.main = async (event, context) => {
       }
       performanceRating = Math.min(10, Math.max(1, Math.round(performanceRating * 10) / 10));
       
-      // 获取评分记录，只保留对应有效 completed 比赛的评分
-      const playerDoc = await db.collection('players').doc(p._id).get();
-      const ratings = (playerDoc.data || {}).ratings || {};
-      
-      const peerRatings = (ratings.peerRatings || []).filter(r => validMatchIds.has(r.matchId));
-      const adminRatings = (ratings.adminRatings || []).filter(r => validMatchIds.has(r.matchId));
-      const initialRating = ratings.initialRating || 5;
-      
-      // 计算平均分（仅基于有效比赛的评分）
-      const peerAvg = peerRatings.length > 0 
-        ? peerRatings.reduce((s, r) => s + r.score, 0) / peerRatings.length 
-        : initialRating;
-      const adminAvg = adminRatings.length > 0 
-        ? adminRatings.reduce((s, r) => s + r.score, 0) / adminRatings.length 
-        : initialRating;
+      // 直接使用 playerRatingsMap，避免重复 doc().get()
+      const pr = playerRatingsMap[p._id] || { initialRating: 5, peerRatings: [], adminRatings: [] };
+      const peerAvg = pr.peerRatings.length > 0 
+        ? pr.peerRatings.reduce((s, r) => s + r.score, 0) / pr.peerRatings.length 
+        : pr.initialRating;
+      const adminAvg = pr.adminRatings.length > 0 
+        ? pr.adminRatings.reduce((s, r) => s + r.score, 0) / pr.adminRatings.length 
+        : pr.initialRating;
       
       // 综合评分 = 队友互评50% + 管理员30% + 比赛表现20%
       let compositeRating = peerAvg * 0.5 + adminAvg * 0.3 + performanceRating * 0.2;
@@ -166,14 +168,14 @@ exports.main = async (event, context) => {
       s.peerAvg = peerAvg;
       s.adminAvg = adminAvg;
 
-      results.push({
+      const resultItem = {
         playerId: p._id,
-        nickname: p.nickname,
-        initialRating,
-        peerAvg,
-        adminAvg,
-        performanceRating,
-        compositeRating,
+        nickname: p.nickname || '未知',
+        initialRating: pr.initialRating,
+        peerAvg: peerAvg,
+        adminAvg: adminAvg,
+        performanceRating: performanceRating,
+        compositeRating: compositeRating,
         appearances: s.appearances,
         wins: s.wins,
         draws: s.draws,
@@ -181,9 +183,10 @@ exports.main = async (event, context) => {
         goals: s.goals,
         assists: s.assists,
         mvp: s.mvp
-      });
+      };
+      results.push(resultItem);
 
-      await db.collection('players').doc(p._id).update({
+      updatePromises.push(db.collection('players').doc(p._id).update({
         data: { 
           stats: {
             appearances: s.appearances,
@@ -204,8 +207,9 @@ exports.main = async (event, context) => {
             mvp: s.mvp
           }
         }
-      });
+      }));
     }
+    await Promise.all(updatePromises);
 
     return { success: true, updated: players.length, results };
   } catch (e) {

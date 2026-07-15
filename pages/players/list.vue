@@ -18,17 +18,17 @@
         <text class="stats-label">助攻</text>
       </view>
       <view class="stats-item">
-        <text class="stats-num">{{totalMVP}}</text>
-        <text class="stats-label">MVP</text>
+        <text class="stats-num">{{totalMatches}}</text>
+        <text class="stats-label">场次</text>
       </view>
     </view>
 
     <view class="sort-bar">
-      <view class="sort-btn" :class="{active: sortBy === 'rating'}" @click="changeSort('rating')">评分</view>
-      <view class="sort-btn" :class="{active: sortBy === 'mvp'}" @click="changeSort('mvp')">MVP</view>
-      <view class="sort-btn" :class="{active: sortBy === 'appearances'}" @click="changeSort('appearances')">出场</view>
-      <view class="sort-btn" :class="{active: sortBy === 'goals'}" @click="changeSort('goals')">进球</view>
-      <view class="sort-btn" :class="{active: sortBy === 'assists'}" @click="changeSort('assists')">助攻</view>
+      <view class="sort-btn" :class="{active: sortBy === 'rating'}" @click="changeSort('rating')">评分<span v-if="sortBy === 'rating'" class="sort-arrow">↓</span></view>
+      <view class="sort-btn" :class="{active: sortBy === 'mvp'}" @click="changeSort('mvp')">MVP<span v-if="sortBy === 'mvp'" class="sort-arrow">↓</span></view>
+      <view class="sort-btn" :class="{active: sortBy === 'appearances'}" @click="changeSort('appearances')">出场<span v-if="sortBy === 'appearances'" class="sort-arrow">↓</span></view>
+      <view class="sort-btn" :class="{active: sortBy === 'goals'}" @click="changeSort('goals')">进球<span v-if="sortBy === 'goals'" class="sort-arrow">↓</span></view>
+      <view class="sort-btn" :class="{active: sortBy === 'assists'}" @click="changeSort('assists')">助攻<span v-if="sortBy === 'assists'" class="sort-arrow">↓</span></view>
     </view>
 
     <view class="create-bar" @click="goCreate">
@@ -47,19 +47,19 @@
           <text v-if="p.stats?.assistantCount > 0" class="tag tag-purple">🛡️{{p.stats.assistantCount}}</text>
           <text v-if="p.stats?.mvp > 0" class="tag tag-gold">🏆{{p.stats.mvp}}</text>
         </view>
-        <view class="positions">{{getPositions(p)}}</view>
+        <view class="positions">{{getPositions(p)}} <text v-if="getHistoricalRating(p)" class="rating-badge">⭐ {{getHistoricalRating(p)}}</text></view>
         <view class="stats-row">
           <text class="stats-item">👟 {{p.stats?.appearances || 0}}</text>
-          <text class="stats-item">⚽ {{p.stats?.goals || 0}}</text>
-          <text class="stats-item">🅰️ {{p.stats?.assists || 0}}</text>
+          <text class="stats-item">⚽ {{p._liveGoals || 0}}</text>
+          <text class="stats-item">🅰️ {{p._liveAssists || 0}}</text>
           <text class="stats-item" v-if="p.stats?.yellowCards">🟨 {{p.stats.yellowCards}}</text>
           <text class="stats-item" v-if="p.stats?.redCards">🟥 {{p.stats.redCards}}</text>
           <text class="stats-item" v-if="p.stats?.mvp">🏆 {{p.stats.mvp}}</text>
         </view>
       </view>
       <view class="right-box">
-        <view class="rating-num">{{p.stats?.appearances || 0}}</view>
-        <view class="rating-label">出场</view>
+        <view class="rating-num">{{getHistoricalRating(p) || '5.0'}}</view>
+        <view class="rating-label">评分</view>
         <view v-if="isAdmin" class="delete-btn" @click.stop="deletePlayer(p._id)">🗑️</view>
       </view>
     </view>
@@ -80,19 +80,19 @@ const POSITIONS = [
   { id: 'ST', name: '前锋' }, { id: 'CF', name: '中锋' },
 ];
 export default {
-  data() { return { players: [], isAdmin: false, sortBy: 'rating' } },
+  data() { return { players: [], isAdmin: false, sortBy: 'rating', completedMatches: [] } },
   computed: {
     totalAppearances() {
       return this.players.reduce((sum, p) => sum + (p.stats?.appearances || 0), 0);
     },
     totalGoals() {
-      return this.players.reduce((sum, p) => sum + (p.stats?.goals || 0), 0);
+      return this.players.reduce((sum, p) => sum + (p._liveGoals || 0), 0);
     },
     totalAssists() {
-      return this.players.reduce((sum, p) => sum + (p.stats?.assists || 0), 0);
+      return this.players.reduce((sum, p) => sum + (p._liveAssists || 0), 0);
     },
-    totalMVP() {
-      return this.players.reduce((sum, p) => sum + (p.stats?.mvp || 0), 0);
+    totalMatches() {
+      return this.completedMatches.length;
     }
   },
   onShow() { this.loadPlayers() },
@@ -103,13 +103,101 @@ export default {
     },
     sortPlayers() {
       const sortMap = {
-        rating: (a, b) => (b.stats?.rating || 5) - (a.stats?.rating || 5),
+        rating: (a, b) => (b._compositeRating || 5) - (a._compositeRating || 5),
         mvp: (a, b) => (b.stats?.mvp || 0) - (a.stats?.mvp || 0),
         appearances: (a, b) => (b.stats?.appearances || 0) - (a.stats?.appearances || 0),
-        goals: (a, b) => (b.stats?.goals || 0) - (a.stats?.goals || 0),
-        assists: (a, b) => (b.stats?.assists || 0) - (a.stats?.assists || 0)
+        goals: (a, b) => (b._liveGoals || 0) - (a._liveGoals || 0),
+        assists: (a, b) => (b._liveAssists || 0) - (a._liveAssists || 0)
       };
       this.players.sort(sortMap[this.sortBy] || sortMap.rating);
+    },
+    // 评分计算函数（与 detail.vue 完全一致）
+    calculatePlayerRating(player, completedMatches) {
+      const playerId = player._id;
+      const FRONT_POSITIONS = ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];
+      const BACK_POSITIONS = ['GK', 'CB', 'LB', 'RB', 'CDM'];
+      
+      let winPoints = 0, teamMatches = 0, yellowCount = 0, redCount = 0;
+      let goals = 0, assists = 0;
+
+      for (const m of completedMatches) {
+        const inTeamA = (m.teamA?.players || []).includes(playerId);
+        const inTeamB = (m.teamB?.players || []).includes(playerId);
+        if (!inTeamA && !inTeamB) continue;
+
+        teamMatches++;
+        const aScore = m.teamA?.score || 0;
+        const bScore = m.teamB?.score || 0;
+        if (inTeamA) {
+          if (aScore > bScore) winPoints += 3;
+          else if (aScore === bScore) winPoints += 1;
+        } else {
+          if (bScore > aScore) winPoints += 3;
+          else if (bScore === aScore) winPoints += 1;
+        }
+
+        for (const e of (m.events || [])) {
+          if (e.playerId === playerId) {
+            if (e.type === 'goal') goals++;
+            if (e.type === 'yellow') yellowCount++;
+            if (e.type === 'red') redCount++;
+          }
+          if (e.type === 'goal' && e.assistById === playerId) {
+            assists++;
+          }
+        }
+      }
+
+      const isFront = player.positions?.some(pos => FRONT_POSITIONS.includes(pos));
+      const isBack = player.positions?.some(pos => BACK_POSITIONS.includes(pos));
+
+      let performanceRating = 5;
+      if (teamMatches > 0) {
+        const winRate = winPoints / (teamMatches * 3);
+        const goalRate = Math.min(goals / teamMatches, 2);
+        const assistRate = Math.min(assists / teamMatches, 2);
+        const cardPenalty = (redCount * 1 + yellowCount * 0.3) / teamMatches;
+
+        if (isFront) {
+          performanceRating = 5 + winRate * 2 + goalRate * 1.5 + assistRate * 1 - cardPenalty;
+        } else if (isBack) {
+          performanceRating = 5 + winRate * 3 - cardPenalty * 0.5;
+        } else {
+          performanceRating = 5 + winRate * 2 + goalRate * 1 + assistRate * 0.5 - cardPenalty;
+        }
+        performanceRating = Math.min(10, Math.max(1, Math.round(performanceRating * 10) / 10));
+      }
+
+      const validMatchIds = new Set(completedMatches.map(m => m._id));
+      const ratings = player.ratings || {};
+      const peerRatings = (ratings.peerRatings || []).filter(r => validMatchIds.has(r.matchId));
+      const adminRatings = (ratings.adminRatings || []).filter(r => validMatchIds.has(r.matchId));
+      const initialRating = (typeof ratings.initialRating === 'number') ? ratings.initialRating : 5;
+
+      const peerAvg = peerRatings.length > 0
+        ? peerRatings.reduce((s, r) => s + r.score, 0) / peerRatings.length
+        : initialRating;
+      const adminAvg = adminRatings.length > 0
+        ? adminRatings.reduce((s, r) => s + r.score, 0) / adminRatings.length
+        : initialRating;
+
+      let compositeRating = peerAvg * 0.5 + adminAvg * 0.3 + performanceRating * 0.2;
+      compositeRating = Math.min(10, Math.max(1, Math.round(compositeRating * 10) / 10));
+
+      return {
+        compositeRating,
+        peerAvg,
+        adminAvg,
+        performanceRating,
+        teamMatches,
+        winPoints,
+        goals,
+        assists,
+        yellowCount,
+        redCount,
+        peerCount: peerRatings.length,
+        adminCount: adminRatings.length
+      };
     },
     async loadPlayers() {
       wx.showLoading({ title: '加载中' });
@@ -118,7 +206,44 @@ export default {
         this.isAdmin = result.isAdmin || false;
 
         const { result: playerResult } = await wx.cloud.callFunction({ name: 'getPlayers' });
-        this.players = (playerResult.players || []);
+        const players = playerResult.players || [];
+
+        const matchesRes = await db.collection('matches').where({ status: 'completed' }).limit(100).get();
+        this.completedMatches = matchesRes.data;
+
+        const goalMap = {};
+        const assistMap = {};
+        for (const m of this.completedMatches) {
+          for (const e of (m.events || [])) {
+            if (e.type === 'goal' && e.playerId) {
+              goalMap[e.playerId] = (goalMap[e.playerId] || 0) + 1;
+            }
+            if (e.type === 'goal' && e.assistById) {
+              assistMap[e.assistById] = (assistMap[e.assistById] || 0) + 1;
+            }
+          }
+        }
+
+        this.players = [];
+        for (const p of players) {
+          // 筛选该球员实际参加的比赛
+          const playerMatches = this.completedMatches.filter(m => {
+            const inA = (m.teamA?.players || []).includes(p._id);
+            const inB = (m.teamB?.players || []).includes(p._id);
+            return inA || inB;
+          });
+          const rating = this.calculatePlayerRating(p, playerMatches);
+          this.players.push({
+            ...p,
+            _liveGoals: goalMap[p._id] || 0,
+            _liveAssists: assistMap[p._id] || 0,
+            _peerAvg: rating.peerAvg,
+            _adminAvg: rating.adminAvg,
+            _performanceRating: rating.performanceRating,
+            _compositeRating: rating.compositeRating
+          });
+        }
+
         this.sortPlayers();
       } catch (e) {
         console.error('加载球员失败', e);
@@ -131,12 +256,9 @@ export default {
       return p.positions.map(pos => POSITIONS.find(pt => pt.id === pos)?.name || pos).join(' · ');
     },
     getHistoricalRating(p) {
-      if (!p.ratings) return null;
-      const peerScores = (p.ratings.peerRatings || []).map(r => r.score);
-      const adminScores = (p.ratings.adminRatings || []).map(r => r.score);
-      const allScores = [...peerScores, ...adminScores];
-      if (allScores.length === 0) return null;
-      return (allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(1);
+      // 统一显示综合评分（互评×50% + 管理员×30% + 表现×20%）
+      if (p._compositeRating !== undefined && !isNaN(p._compositeRating)) return p._compositeRating.toFixed(1);
+      return '5.0';
     },
     goCreate() { uni.navigateTo({ url: '/pages/players/create' }) },
     goDetail(id) { uni.navigateTo({ url: `/pages/players/detail?id=${id}` }) },
@@ -181,6 +303,8 @@ export default {
 .sort-bar { display: flex; gap: 12rpx; margin-bottom: 16rpx; overflow-x: auto; }
 .sort-btn { padding: 12rpx 20rpx; border-radius: 12rpx; font-size: 26rpx; font-weight: 600; background: #f0f0f0; color: #666; white-space: nowrap; }
 .sort-btn.active { background: linear-gradient(135deg, #1e40af, #3b82f6); color: #fff; }
+.sort-arrow { font-size: 22rpx; margin-left: 4rpx; }
+.rating-badge { font-size: 24rpx; color: #f59e0b; font-weight: 700; margin-left: 12rpx; }
 .create-bar { margin-bottom: 20rpx; }
 .player-card {
   display: flex; align-items: center; background: #fff; border-radius: 16rpx;

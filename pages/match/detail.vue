@@ -21,21 +21,61 @@
           </view>
         </view>
         
-        <!-- 比分 -->
+        <!-- 比分牌：与场次列表一致 -->
         <view class="match-result" v-if="match.status !== 'upcoming'">
           <view class="team-side">
             <view class="team team-a">
-              <view class="team-dot" :style="{background: match.teamA?.color || '#16a34a'}"></view>
-              <view class="team-color-name">{{match.teamA?.name || 'A队'}}</view>
+              <view class="team-dot" :style="{background: getTeamDotColor(match.teamA)}"></view>
+              <view class="team-name">{{match.teamA?.name || 'A队'}}</view>
               <view class="team-score">{{match.teamA?.score || 0}}</view>
+            </view>
+            <view v-if="getTeamAGoals(match).length > 0" class="team-goals">
+              <view class="team-goal-item" v-for="(g, idx) in getTeamAGoals(match)" :key="'a-'+idx">
+                <text class="goal-icon">⚽</text>
+                <text class="goal-player">{{getPlayerName(g.playerId)}}<text v-if="g.isOwnGoal" class="own-goal-tag">(OG)</text></text>
+                <text v-if="g.assistById" class="goal-assist">🅰️ {{getPlayerName(g.assistById)}}</text>
+                <text v-if="g.minute" class="goal-minute">{{g.minute}}'</text>
+              </view>
             </view>
           </view>
           <view class="vs">:</view>
           <view class="team-side">
             <view class="team team-b">
               <view class="team-score">{{match.teamB?.score || 0}}</view>
-              <view class="team-color-name">{{match.teamB?.name || 'B队'}}</view>
-              <view class="team-dot" :style="{background: match.teamB?.color || '#dc2626'}"></view>
+              <view class="team-name">{{match.teamB?.name || 'B队'}}</view>
+              <view class="team-dot" :style="{background: getTeamDotColor(match.teamB)}"></view>
+            </view>
+            <view v-if="getTeamBGoals(match).length > 0" class="team-goals">
+              <view class="team-goal-item" v-for="(g, idx) in getTeamBGoals(match)" :key="'b-'+idx">
+                <text v-if="g.minute" class="goal-minute">{{g.minute}}'</text>
+                <text class="goal-icon">⚽</text>
+                <text class="goal-player">{{getPlayerName(g.playerId)}}<text v-if="g.isOwnGoal" class="own-goal-tag">(OG)</text></text>
+                <text v-if="g.assistById" class="goal-assist">🅰️ {{getPlayerName(g.assistById)}}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <!-- 两队队员 -->
+        <view class="card" v-if="match.status !== 'upcoming'">
+          <view class="lineups-header">
+            <view class="lineup-tab" :class="{'active': lineupTab === 'A'}" @click="lineupTab = 'A'">
+              <view class="lineup-dot" :style="{background: getTeamDotColor(match.teamA), border: getTeamDotColor(match.teamA) === '#e5e7eb' ? '2rpx solid #475569' : 'none'}"></view>
+              <text>{{match.teamA?.name || 'A队'}}</text>
+            </view>
+            <view class="lineup-tab" :class="{'active': lineupTab === 'B'}" @click="lineupTab = 'B'">
+              <view class="lineup-dot" :style="{background: getTeamDotColor(match.teamB), border: getTeamDotColor(match.teamB) === '#e5e7eb' ? '2rpx solid #475569' : 'none'}"></view>
+              <text>{{match.teamB?.name || 'B队'}}</text>
+            </view>
+          </view>
+          <view class="lineup-list">
+            <view class="lineup-item" v-for="pid in (lineupTab === 'A' ? teamAPlayersFiltered : teamBPlayersFiltered)" :key="pid">
+              <view class="lineup-player">{{players[pid]?.nickname || '?'}}</view>
+              <view class="lineup-stats">
+                <text v-if="getPlayerGoals(pid) > 0" class="stat-goal">⚽{{getPlayerGoals(pid)}}</text>
+                <text v-if="getPlayerAssists(pid) > 0" class="stat-assist">🎯{{getPlayerAssists(pid)}}</text>
+                <text v-if="match.status === 'completed'" class="stat-rating">{{getPlayerMatchRating(pid)?.toFixed(1) || '-'}}</text>
+              </view>
             </view>
           </view>
         </view>
@@ -50,49 +90,73 @@
       <view class="card" v-if="isAdmin">
         <view class="section-title">🔧 管理员操作</view>
         <view class="admin-grid">
-          <view class="admin-btn" v-if="match.status === 'upcoming'" @click="goEdit">
+          <view class="admin-btn" v-if="match.status === 'upcoming' || isSuperAdmin" @click="goEdit">
             <text class="admin-icon">📝</text>
             <text class="admin-label">编辑信息</text>
           </view>
-          <view class="admin-btn" v-if="match.status === 'upcoming'" @click="confirmTeam">
+          <view class="admin-btn" v-if="isSuperAdmin && !isSortingMode" @click="enterSortMode">
+            <text class="admin-icon">🔀</text>
+            <text class="admin-label">调整排序</text>
+          </view>
+          <view class="admin-btn" v-if="isSuperAdmin && isSortingMode" @click="saveSortOrder">
+            <text class="admin-icon">💾</text>
+            <text class="admin-label">保存排序</text>
+          </view>
+          <view class="admin-btn" v-if="isSuperAdmin && isSortingMode" @click="cancelSortMode">
+            <text class="admin-icon">❌</text>
+            <text class="admin-label">取消排序</text>
+          </view>
+          <view class="admin-btn" v-if="match.status === 'upcoming' && !isSortingMode" @click="confirmTeam">
             <text class="admin-icon">📋</text>
             <text class="admin-label">{{match.teamConfirmed ? '重新确认' : '确认名单'}}</text>
           </view>
-          <view class="admin-btn" v-if="match.status === 'upcoming'" @click="toggleRegistration">
+          <view class="admin-btn" v-if="match.status === 'upcoming' && !isSortingMode" @click="toggleRegistration">
             <text class="admin-icon">🔒</text>
             <text class="admin-label">{{match.registrationClosed ? '开启报名' : '关闭报名'}}</text>
           </view>
-          <view class="admin-btn" @click="goTeamSplit">
+          <view class="admin-btn" v-if="!isSortingMode" @click="goTeamSplit">
             <text class="admin-icon">⚙️</text>
             <text class="admin-label">调整分队</text>
           </view>
-          <view class="admin-btn" @click="goRecord">
+          <view class="admin-btn" v-if="!isSortingMode" @click="goRecord">
             <text class="admin-icon">📝</text>
             <text class="admin-label">{{match.status === 'completed' ? '查看赛况' : '记录赛况'}}</text>
           </view>
-          <view class="admin-btn" v-if="match.status === 'upcoming'" @click="changeOwner">
+          <view class="admin-btn" v-if="match.status === 'upcoming' && !isSortingMode" @click="changeOwner">
             <text class="admin-icon">👑</text>
             <text class="admin-label">场主</text>
           </view>
-          <view class="admin-btn" v-if="match.status === 'upcoming'" @click="addAssistant">
+          <view class="admin-btn" v-if="match.status === 'upcoming' && !isSortingMode" @click="addAssistant">
             <text class="admin-icon">🛡️</text>
             <text class="admin-label">护法</text>
           </view>
-          <view class="admin-btn" v-if="match.status === 'upcoming'" @click="startMatch">
+          <view class="admin-btn" v-if="!isSortingMode" @click="adminRegister">
+            <text class="admin-icon">➕</text>
+            <text class="admin-label">代报名</text>
+          </view>
+          <view class="admin-btn" v-if="!isSortingMode" @click="addTempPlayer">
+            <text class="admin-icon">👤</text>
+            <text class="admin-label">临时球员</text>
+          </view>
+          <view class="admin-btn" v-if="match.status === 'upcoming' && !isSortingMode" @click="startMatch">
             <text class="admin-icon">▶️</text>
             <text class="admin-label">开始比赛</text>
           </view>
-          <view class="admin-btn" v-if="match.status === 'ongoing'" @click="endMatch">
+          <view class="admin-btn" v-if="match.status === 'ongoing' && !isSortingMode" @click="endMatch">
             <text class="admin-icon">⏹️</text>
             <text class="admin-label">结束比赛</text>
           </view>
-          <view class="admin-btn" v-if="match.status === 'completed'" @click="toggleRating">
+          <view class="admin-btn" v-if="match.status === 'completed' && !isSortingMode" @click="toggleRating">
             <text class="admin-icon">⭐</text>
             <text class="admin-label">{{match.ratingOpen ? '关闭评分' : '开启评分'}}</text>
           </view>
-          <view class="admin-btn" @click="deleteMatch">
+          <view class="admin-btn" v-if="!isSortingMode" @click="deleteMatch">
             <text class="admin-icon">🗑️</text>
             <text class="admin-label">删除场次</text>
+          </view>
+          <view class="admin-btn" v-if="match.status === 'completed' && isSuperAdmin && !isSortingMode" @click="showPeerRatingsModal">
+            <text class="admin-icon">📋</text>
+            <text class="admin-label">互评记录</text>
           </view>
         </view>
       </view>
@@ -114,7 +178,11 @@
       
       <!-- 场主/护法 -->
       <view class="card" v-if="match.ownerId || (match.assistantIds || []).length > 0">
-        <view class="section-title">👑 场主/护法</view>
+        <view class="section-header" @click="match.status === 'completed' && toggleCollapse('owner')">
+          <view class="section-title">👑 场主/护法</view>
+          <text class="collapse-arrow">{{collapsedSections.owner ? '▼' : '▲'}}</text>
+        </view>
+        <view v-if="!collapsedSections.owner">
         <view class="owner-item">
           <text class="owner-label">场主</text>
           <text class="owner-name">{{ownerName}}</text>
@@ -129,63 +197,77 @@
           <text class="owner-label">护法</text>
           <text class="owner-action" @click="addAssistant">+ 添加</text>
         </view>
+        </view>
       </view>
       
       <!-- 报名接龙 -->
       <view class="card">
-        <view class="section-header">
+        <view class="section-header" @click="match.status === 'completed' && toggleCollapse('registration')">
           <view class="section-title">👥 报名接龙</view>
-          <view class="section-count">{{registrations.length}}人</view>
+          <text class="collapse-arrow">{{collapsedSections.registration ? '▼' : '▲'}}</text>
         </view>
-        <view class="reg-list" v-if="registrations.length > 0">
-          <view class="reg-item" v-for="(r, index) in registrations" :key="r.playerId">
-            <view class="reg-info">
-              <view class="reg-name-row">
-                <text v-if="r.isTempPlayer" class="temp-tag">👤</text>
-                <view class="player-name-link" @click.stop="!r.isTempPlayer && goPlayerDetail(r.playerId)">
-                  {{r.isTempPlayer ? r.tempNickname : (r.player?.nickname || '未知')}}
+        <view v-if="!collapsedSections.registration">
+        <view class="section-count-line">{{(isSortingMode ? sortableRegistrations : sortedRegistrations).filter(r => !r.isWL).length}}/{{match.maxPlayers || 14}}人 + WL {{(isSortingMode ? sortableRegistrations : sortedRegistrations).filter(r => r.isWL).length}}</view>
+        <view class="reg-list" v-if="(isSortingMode ? sortableRegistrations : sortedRegistrations).length > 0">
+          <block v-for="(r, index) in (isSortingMode ? sortableRegistrations : sortedRegistrations)" :key="r.playerId">
+            <view v-if="index === (match.maxPlayers || 14)" class="wl-divider">
+              <view class="wl-line"></view>
+              <text class="wl-text">Waiting List</text>
+              <view class="wl-line"></view>
+            </view>
+            <view class="reg-item" :class="{'wl-item': r.isWL}">
+              <view class="reg-info">
+                <view class="reg-name-row">
+                  <text v-if="isSortingMode" class="sort-handle" @click="moveUp(index)" :style="{opacity: index > 0 ? 1 : 0.3}">⬆️</text>
+                  <text class="reg-num">{{r.displayIndex}}.</text>
+                  <text v-if="r.isTempPlayer" class="temp-tag">👤</text>
+                  <view class="player-name-link" @click.stop="!r.isTempPlayer && goPlayerDetail(r.playerId)">
+                    {{r.isTempPlayer ? r.tempNickname : (r.player?.nickname || '未知')}}
+                  </view>
+                  <text v-if="r.player?.kttLast4" class="ktt-tag">({{r.player.kttLast4}})</text>
+                  <text v-if="r.isWL" class="tag tag-wl">WL</text>
+                  <text v-if="isSortingMode" class="sort-handle" @click="moveDown(index)" :style="{opacity: index < sortableRegistrations.length - 1 ? 1 : 0.3}">⬇️</text>
                 </view>
-                <text v-if="r.player?.kttLast4" class="ktt-tag">({{r.player.kttLast4}})</text>
+                <view class="reg-tags">
+                  <text v-if="r.isTempPlayer" class="tag tag-gray">临时</text>
+                  <text v-if="match.ownerId === r.playerId" class="tag tag-yellow">👑</text>
+                  <text v-if="(match.assistantIds || []).includes(r.playerId)" class="tag tag-purple">🛡️</text>
+                  <text v-if="!r.isTempPlayer && isInTeamA(r.playerId)" class="tag tag-blue">{{(match.teamA?.name || 'A队').replace(/[🔴🔵]/g,'').trim()}}</text>
+                  <text v-else-if="!r.isTempPlayer && isInTeamB(r.playerId)" class="tag tag-red">{{(match.teamB?.name || 'B队').replace(/[🔴🔵]/g,'').trim()}}</text>
+                </view>
+                <view class="reg-actions-row" v-if="!isSortingMode && (r.playerId === currentPlayerId || isAdmin)">
+                  <view v-if="r.playerId === currentPlayerId && match.needScreenshot !== false && r.status !== 'cancelled'" class="btn-upload" @click="uploadScreenshot">📤 {{r.screenshot ? '重新上传' : '上传截图'}}</view>
+                  <view v-if="isAdmin && r.screenshot" class="btn-preview" @click="previewScreenshot(r.screenshot)">👁️ 查看截图</view>
+                  <view v-if="isAdmin && r.status !== 'confirmed' && r.status !== 'cancelled'" class="btn-confirm" @click="confirmScreenshot(r.playerId)">✅ 确认</view>
+                  <view v-if="isAdmin && r.status === 'confirmed'" class="btn-cancel" @click="cancelConfirm(r.playerId)">❌ 取消确认</view>
+                  <view v-if="isAdmin" class="btn-delete-reg" @click="deleteRegistration(r.playerId)">🗑️ 删除</view>
+                </view>
               </view>
-              <view class="reg-tags">
-                <text v-if="r.isTempPlayer" class="tag tag-gray">临时</text>
-                <text v-if="match.ownerId === r.playerId" class="tag tag-yellow">👑</text>
-                <text v-if="(match.assistantIds || []).includes(r.playerId)" class="tag tag-purple">🛡️</text>
-                <text v-if="!r.isTempPlayer && isInTeamA(r.playerId)" class="tag tag-blue">{{(match.teamA?.name || 'A队').replace(/[🔴🔵]/g,'').trim()}}</text>
-                <text v-else-if="!r.isTempPlayer && isInTeamB(r.playerId)" class="tag tag-red">{{(match.teamB?.name || 'B队').replace(/[🔴🔵]/g,'').trim()}}</text>
-              </view>
-              <!-- 操作按钮 -->
-              <view class="reg-actions-row" v-if="r.playerId === currentPlayerId || isAdmin">
-                <view v-if="r.playerId === currentPlayerId && match.needScreenshot !== false && r.status !== 'cancelled'" class="btn-upload" @click="uploadScreenshot">📤 {{r.screenshot ? '重新上传' : '上传截图'}}</view>
-                <view v-if="isAdmin && r.screenshot" class="btn-preview" @click="previewScreenshot(r.screenshot)">👁️ 查看截图</view>
-                <view v-if="isAdmin && r.status !== 'confirmed' && r.status !== 'cancelled'" class="btn-confirm" @click="confirmScreenshot(r.playerId)">✅ 确认</view>
-                <view v-if="isAdmin && r.status === 'confirmed'" class="btn-cancel" @click="cancelConfirm(r.playerId)">❌ 取消确认</view>
-                <view v-if="isAdmin" class="btn-delete-reg" @click="deleteRegistration(r.playerId)">🗑️ 删除</view>
+              <view class="reg-right" v-if="!isSortingMode">
+                <text v-if="r.status === 'confirmed'" class="status-confirmed">✅</text>
+                <text v-else-if="r.status === 'screenshot_uploaded'" class="status-pending">⏳</text>
+                <text v-else-if="r.status === 'pending_screenshot'" class="status-pending">⏳</text>
+                <text v-else-if="r.status === 'cancelled'" class="status-cancelled">❌</text>
               </view>
             </view>
-            <view class="reg-right">
-              <text v-if="r.status === 'confirmed' || r.status === 'screenshot_uploaded'" class="status-confirmed">✅</text>
-              <text v-else-if="r.status === 'pending_screenshot'" class="status-pending">⏳</text>
-              <text v-else-if="r.status === 'cancelled'" class="status-cancelled">❌</text>
-            </view>
-          </view>
+          </block>
         </view>
         <view v-else class="empty-state">暂无报名</view>
         
         <view class="btn-group" v-if="!isRegistered && match.status === 'upcoming' && !match.registrationClosed">
           <view class="btn-primary" @click="showRegister">我要报名</view>
         </view>
+        </view>
       </view>
       
-      <!-- 赛况 -->
-      <view class="card" v-if="match.events && match.events.length > 0">
-        <view class="section-title">📊 赛况</view>
+      <!-- A队赛况 -->
+      <view class="card" v-if="teamAEvents.length > 0">
+        <view class="section-title">{{match.teamA?.name || 'A队'}} 赛况</view>
         <view class="event-list">
-          <view class="event-item" v-for="e in match.events" :key="e.id">
-            <view class="event-team-bar" :style="{background: getEventTeamColor(e.playerId)}"></view>
+          <view class="event-item" v-for="e in teamAEvents" :key="e.id">
             <view class="event-time">{{e.minute}}'</view>
             <view class="event-detail">
-              <text v-if="e.type === 'goal'">⚽ {{players[e.playerId]?.nickname}} 进球</text>
+              <text v-if="e.type === 'goal'">⚽ {{players[e.playerId]?.nickname}} 进球<text v-if="e.assistById"> ({{getPlayerName(e.assistById)}} 助攻)</text></text>
               <text v-else-if="e.type === 'assist'">🎯 助攻: {{players[e.playerId]?.nickname}}</text>
               <text v-else-if="e.type === 'yellow'">🟨 {{players[e.playerId]?.nickname}} 黄牌</text>
               <text v-else-if="e.type === 'red'">🟥 {{players[e.playerId]?.nickname}} 红牌</text>
@@ -194,14 +276,42 @@
           </view>
         </view>
       </view>
-      
+
+      <!-- B队赛况 -->
+      <view class="card" v-if="teamBEvents.length > 0">
+        <view class="section-title">{{match.teamB?.name || 'B队'}} 赛况</view>
+        <view class="event-list">
+          <view class="event-item" v-for="e in teamBEvents" :key="e.id">
+            <view class="event-time">{{e.minute}}'</view>
+            <view class="event-detail">
+              <text v-if="e.type === 'goal'">⚽ {{players[e.playerId]?.nickname}} 进球<text v-if="e.assistById"> ({{getPlayerName(e.assistById)}} 助攻)</text></text>
+              <text v-else-if="e.type === 'assist'">🎯 助攻: {{players[e.playerId]?.nickname}}</text>
+              <text v-else-if="e.type === 'yellow'">🟨 {{players[e.playerId]?.nickname}} 黄牌</text>
+              <text v-else-if="e.type === 'red'">🟥 {{players[e.playerId]?.nickname}} 红牌</text>
+              <text v-else-if="e.type === 'ownGoal' || e.type === 'own_goal'">⚽ {{players[e.playerId]?.nickname}} 乌龙(OG)</text>
+            </view>
+          </view>
+        </view>
+      </view>
       <!-- 评分 -->
       <view class="card" v-if="match.status === 'completed' && match.ratingOpen">
         <view class="section-title">⭐ 评分</view>
         <view class="rating-list">
           <view class="rating-item" v-for="(pid, idx) in confirmedPlayerIds" :key="pid">
-            <text>{{players[pid]?.nickname}}</text>
-            <text>{{(matchRatings[pid] || 5).toFixed(1)}}</text>
+            <view class="rating-left">
+              <text class="rating-name">{{players[pid]?.nickname}}</text>
+              <view class="rating-badges" v-if="getPlayerGoals(pid) > 0 || getPlayerAssists(pid) > 0 || getPlayerYellows(pid) > 0 || getPlayerReds(pid) > 0 || getPlayerOwnGoals(pid) > 0">
+                <text v-if="getPlayerGoals(pid) > 0" class="badge-goal">⚽{{getPlayerGoals(pid)}}</text>
+                <text v-if="getPlayerAssists(pid) > 0" class="badge-assist">🅰️{{getPlayerAssists(pid)}}</text>
+                <text v-if="getPlayerYellows(pid) > 0" class="badge-yellow">🟨{{getPlayerYellows(pid)}}</text>
+                <text v-if="getPlayerReds(pid) > 0" class="badge-red">🟥{{getPlayerReds(pid)}}</text>
+                <text v-if="getPlayerOwnGoals(pid) > 0" class="badge-own">OG{{getPlayerOwnGoals(pid)}}</text>
+              </view>
+            </view>
+            <view class="rating-right">
+              <text v-if="isMVP(pid)" class="mvp-badge">🏆MVP</text>
+              <text class="rating-score">{{(matchRatings[pid] || 5).toFixed(1)}}</text>
+            </view>
           </view>
         </view>
         <view class="btn-primary" style="margin-top:20rpx" @click="goRate">📝 去评分</view>
@@ -221,43 +331,6 @@
         </view>
       </view>
       
-      <!-- 贴图/图片分享 -->
-      <view class="card">
-        <view class="section-header">
-          <view class="section-title">🖼️ 贴图</view>
-          <view class="section-count">{{posts.length}}张</view>
-        </view>
-        <view v-if="posts.length === 0" class="empty-posts">
-          <text>暂无贴图，点击上传第一张</text>
-        </view>
-        <view class="post-list" v-else>
-          <view class="post-item" v-for="post in posts" :key="post._id">
-            <view class="post-header">
-              <view class="post-author">
-                <view class="avatar-small">{{post.playerName?.[0] || '?'}}</view>
-                <text class="post-name">{{post.playerName || '未知'}}</text>
-              </view>
-              <text class="post-time">{{formatTime(post.createdAt)}}</text>
-              <view v-if="isAdmin || post.playerId === currentPlayerId" class="post-delete" @click="deletePost(post._id)">✕</view>
-            </view>
-            <image class="post-image" :src="post.imageUrl" mode="widthFix" @click="previewImage(post.imageUrl)" />
-            <view class="comment-section">
-              <view class="comment-list" v-if="post.comments && post.comments.length > 0">
-                <view class="comment-item" v-for="comment in post.comments" :key="comment._id">
-                  <text class="comment-author">{{comment.playerName || '未知'}}:</text>
-                  <text class="comment-content">{{comment.content}}</text>
-                  <view v-if="isAdmin || comment.playerId === currentPlayerId" class="comment-delete" @click="deleteComment(comment._id)">✕</view>
-                </view>
-              </view>
-              <view class="comment-input-row">
-                <input class="comment-input" v-model="post.commentText" placeholder="写评论..." maxlength="100" />
-                <view class="comment-send" @click="sendComment(post)">发送</view>
-              </view>
-            </view>
-          </view>
-        </view>
-        <view class="btn-secondary" style="margin-top:20rpx" @click="uploadPostImage">📤 上传贴图</view>
-      </view>
     </view>
     <!-- 自定义球员选择器弹窗 -->
     <view class="picker-overlay" v-if="showPlayerPicker" @click="showPlayerPicker = false">
@@ -280,6 +353,32 @@
       <image class="image-preview-img" :src="previewImageUrl" mode="widthFix" @click.stop />
       <view class="image-preview-close" @click="showImagePreview = false">✕ 关闭</view>
     </view>
+
+    <!-- 互评记录弹窗 -->
+    <view class="picker-overlay" v-if="showPeerRatings" @click="showPeerRatings = false">
+      <view class="picker-popup" @click.stop>
+        <view class="picker-header">
+          <text class="picker-title">互评记录</text>
+          <text class="picker-close" @click="showPeerRatings = false">✕</text>
+        </view>
+        <scroll-view scroll-y class="picker-body">
+          <view v-if="allPeerRatings.length === 0" class="empty-state">暂无互评记录</view>
+          <view v-else>
+            <view class="peer-summary">共 {{allPeerRatings.length}} 条互评</view>
+            <view v-for="group in groupedPeerRatings" :key="group.toId">
+              <view class="peer-group-header">👤 {{group.toName}}</view>
+              <view class="peer-group-body">
+                <view class="peer-rating-item" v-for="r in group.items" :key="r.fromId">
+                  <text class="peer-from">{{r.fromName}}</text>
+                  <text class="peer-arrow">→</text>
+                  <text class="peer-score">{{r.score}}分</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -295,10 +394,9 @@ export default {
       players: {},
       openid: '',
       isAdmin: false,
+      isSuperAdmin: false,
       currentPlayerId: '',
-      matchRatings: {},
-      posts: [],
-      // 自定义球员选择器
+      allPlayers: [],
       showPlayerPicker: false,
       pickerTitle: '',
       pickerPlayers: [],
@@ -306,6 +404,13 @@ export default {
       // 图片预览
       showImagePreview: false,
       previewImageUrl: '',
+      lineupTab: 'A',
+      collapsedSections: { owner: false, registration: false },
+      showPeerRatings: false,
+      allPeerRatings: [],
+      // 手动排序模式
+      isSortingMode: false,
+      sortableRegistrations: [],
     };
   },
   computed: {
@@ -344,7 +449,7 @@ export default {
       const now = new Date();
       return (now - created) < 24 * 60 * 60 * 1000;
     },
-    registrations() {
+    rawRegistrations() {
       return (this.match.registrations || []).map(r => {
         // 兼容旧数据：没有status字段的，根据needScreenshot判断
         let status = r.status;
@@ -358,6 +463,38 @@ export default {
         };
       });
     },
+    sortedRegistrations() {
+      const maxPlayers = this.match.maxPlayers || 14;
+      const ownerId = this.match.ownerId;
+      const assistantIds = this.match.assistantIds || [];
+      const isProtected = (r) => r.playerId === ownerId || assistantIds.includes(r.playerId);
+      const sorted = [...this.rawRegistrations].sort((a, b) => {
+        // 1. 场主/护法优先级最高
+        const protectedA = isProtected(a) ? 1 : 0;
+        const protectedB = isProtected(b) ? 1 : 0;
+        if (protectedA !== protectedB) return protectedB - protectedA;
+        // 2. 同优先级内按状态排序：confirmed > screenshot_uploaded > pending_screenshot > cancelled
+        const statusPriority = { confirmed: 4, screenshot_uploaded: 3, pending_screenshot: 2, cancelled: 1 };
+        const priorityA = statusPriority[a.status] || 0;
+        const priorityB = statusPriority[b.status] || 0;
+        if (priorityA !== priorityB) return priorityB - priorityA;
+        // 3. confirmed 状态按 confirmedAt 时间排序（先确认的在前）
+        if (a.status === 'confirmed' && b.status === 'confirmed') {
+          const timeA = a.confirmedAt ? new Date(a.confirmedAt).getTime() : 0;
+          const timeB = b.confirmedAt ? new Date(b.confirmedAt).getTime() : 0;
+          if (timeA !== timeB) return timeA - timeB;
+        }
+        // 4. 其他状态按报名时间排序
+        const regTimeA = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
+        const regTimeB = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+        return regTimeA - regTimeB;
+      });
+      return sorted.map((r, idx) => ({
+        ...r,
+        displayIndex: idx + 1,
+        isWL: idx >= maxPlayers
+      }));
+    },
     isRegistered() {
       return this.match.registrations?.some(r => r.playerId === this.currentPlayerId && r.status !== 'cancelled');
     },
@@ -366,8 +503,71 @@ export default {
     },
     confirmedPlayerIds() {
       return (this.match.registrations || [])
-        .filter(r => r.status === 'confirmed' || r.status === 'screenshot_uploaded')
+        .filter(r => {
+          // 状态检查：必须是已确认或已上传截图
+          if (r.status !== 'confirmed' && r.status !== 'screenshot_uploaded') return false;
+          // 临时球员过滤：兼容各种数据格式（truthy 的 isTempPlayer、有 tempNickname、playerId 以 temp_ 开头）
+          if (r.isTempPlayer) return false;
+          if (r.tempNickname) return false;
+          const pid = r.playerId;
+          if (!pid) return false;
+          if (typeof pid === 'string' && pid.startsWith('temp_')) return false;
+          // 兜底：如果 players 对象中标记为临时球员，也过滤
+          if (this.players[pid]?._isTempPlayer) return false;
+          return true;
+        })
         .map(r => r.playerId);
+    },
+    matchRatings() {
+      const ratings = {};
+      for (const pid of this.confirmedPlayerIds) {
+        ratings[pid] = this.getPlayerMatchRating(pid) || 5;
+      }
+      return ratings;
+    },
+    teamAGoalEvents() {
+      return (this.match.events || [])
+        .filter(e => e.type === 'goal' && this.isInTeamA(e.playerId))
+        .sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    },
+    teamBGoalEvents() {
+      return (this.match.events || [])
+        .filter(e => e.type === 'goal' && this.isInTeamB(e.playerId))
+        .sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    },
+    teamAEvents() {
+      const events = this.match.events || [];
+      return events
+        .filter(e => this.isInTeamA(e.playerId))
+        .sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    },
+    teamBEvents() {
+      const events = this.match.events || [];
+      return events
+        .filter(e => this.isInTeamB(e.playerId))
+        .sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    },
+    goalEvents() {
+      return (this.match.events || [])
+        .filter(e => e.type === 'goal')
+        .sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    },
+    teamAPlayersFiltered() {
+      return (this.match.teamA?.players || []).filter(pid => !this.players[pid]?._isTempPlayer);
+    },
+    teamBPlayersFiltered() {
+      return (this.match.teamB?.players || []).filter(pid => !this.players[pid]?._isTempPlayer);
+    },
+    // 按被评人分组的互评记录
+    groupedPeerRatings() {
+      const groups = {};
+      for (const r of this.allPeerRatings) {
+        if (!groups[r.toId]) {
+          groups[r.toId] = { toId: r.toId, toName: r.toName, items: [] };
+        }
+        groups[r.toId].items.push(r);
+      }
+      return Object.values(groups);
     },
   },
   onLoad(options) {
@@ -391,25 +591,8 @@ export default {
         const loginRes = await wx.cloud.callFunction({ name: 'login' });
         this.openid = loginRes.result.openid;
         this.isAdmin = loginRes.result.isAdmin || false;
+        this.isSuperAdmin = loginRes.result.isSuperAdmin || false;
         this.currentPlayerId = loginRes.result.playerId || '';
-
-        if (!this.currentPlayerId) {
-          this.loading = false;
-          uni.showModal({
-            title: '⚠️ 尚未注册',
-            content: '您还没有注册球员信息，请先注册后再查看场次。',
-            confirmText: '去注册',
-            cancelText: '返回',
-            success: (res) => {
-              if (res.confirm) {
-                uni.switchTab({ url: '/pages/players/my' });
-              } else {
-                uni.navigateBack();
-              }
-            }
-          });
-          return;
-        }
 
         const { data } = await db.collection('matches').doc(this.matchId).get();
         this.match = {
@@ -444,11 +627,25 @@ export default {
                 this.players[p._id] = p; 
               }
             });
+            this.allPlayers = allPlayers;
           } catch (e) {
             console.error('加载球员信息失败', e);
           }
         }
-        this.loadPosts();
+        
+        // 注入临时球员信息（分队页面可能已将临时球员分配到队伍中）
+        (data.registrations || []).forEach(r => {
+          if (r.isTempPlayer || (r.playerId && r.playerId.startsWith('temp_'))) {
+            this.players[r.playerId] = {
+              _id: r.playerId,
+              nickname: r.tempNickname || '临时球员',
+              _isTempPlayer: true,
+              positions: r.tempPositions || [],
+              height: '', weight: '', birthDate: '',
+              stats: { rating: 5 }
+            };
+          }
+        });
       } catch (e) {
         console.error('加载失败', e);
       }
@@ -456,6 +653,20 @@ export default {
     },
     
     showRegister() {
+      if (!this.currentPlayerId) {
+        uni.showModal({
+          title: '⚠️ 尚未注册',
+          content: '您还没有注册球员信息，注册后才能报名参赛。',
+          confirmText: '去注册',
+          cancelText: '取消',
+          success: (res) => {
+            if (res.confirm) {
+              uni.switchTab({ url: '/pages/players/my' });
+            }
+          }
+        });
+        return;
+      }
       this.doRegister(this.currentPlayerId);
     },
 
@@ -491,8 +702,21 @@ export default {
     },
 
     async cancelRegister(playerId) {
+      // 计算是否满足罚款条件：距离开赛不足24小时，且取消后已报名人数 < 人数上限
+      const matchDateTime = new Date(`${this.match.date}T${this.match.time}`);
+      const cancelDeadline = new Date(matchDateTime.getTime() - 24 * 60 * 60 * 1000);
+      const now = new Date();
+      const isWithin24h = now > cancelDeadline;
+      const confirmedCount = this.sortedRegistrations.filter(r => !r.isWL && r.status !== 'cancelled').length;
+      const willBeBelowLimit = confirmedCount - 1 < (this.match.maxPlayers || 14);
+      
+      const showWarning = isWithin24h && willBeBelowLimit;
+      
       uni.showModal({
-        title: '确认退出', content: '确定退出这场比赛的报名？',
+        title: showWarning ? '⚠️ 取消报名确认' : '确认退出',
+        content: showWarning 
+          ? '距离开赛已不足24小时，且无候补球员，可能会被罚款。确定退出报名？'
+          : '确定退出这场比赛的报名？',
         confirmColor: '#dc2626',
         success: async (res) => {
           if (res.confirm) {
@@ -509,6 +733,76 @@ export default {
           }
         }
       });
+    },
+
+    async toggleRegistration() {
+      const newVal = !this.match.registrationClosed;
+      try {
+        await db.collection('matches').doc(this.matchId).update({ data: { registrationClosed: newVal } });
+        this.match.registrationClosed = newVal;
+        uni.showToast({ title: newVal ? '已关闭报名' : '已开启报名' });
+      } catch (e) { uni.showToast({ title: '操作失败', icon: 'none' }); }
+    },
+
+    // 手动排序模式
+    enterSortMode() {
+      // 复制当前排序后的报名列表到可编辑数组
+      this.sortableRegistrations = this.sortedRegistrations.map((r, idx) => ({
+        ...r,
+        sortIndex: idx,
+        isWL: idx >= (this.match.maxPlayers || 14)
+      }));
+      this.isSortingMode = true;
+    },
+    cancelSortMode() {
+      this.isSortingMode = false;
+      this.sortableRegistrations = [];
+    },
+    moveUp(index) {
+      if (index <= 0) return;
+      const arr = this.sortableRegistrations;
+      [arr[index - 1], arr[index]] = [arr[index], arr[index - 1]];
+      // 重新计算 displayIndex 和 isWL
+      const maxPlayers = this.match.maxPlayers || 14;
+      this.sortableRegistrations = arr.map((r, idx) => ({
+        ...r,
+        displayIndex: idx + 1,
+        isWL: idx >= maxPlayers
+      }));
+    },
+    moveDown(index) {
+      if (index >= this.sortableRegistrations.length - 1) return;
+      const arr = this.sortableRegistrations;
+      [arr[index], arr[index + 1]] = [arr[index + 1], arr[index]];
+      // 重新计算 displayIndex 和 isWL
+      const maxPlayers = this.match.maxPlayers || 14;
+      this.sortableRegistrations = arr.map((r, idx) => ({
+        ...r,
+        displayIndex: idx + 1,
+        isWL: idx >= maxPlayers
+      }));
+    },
+    async saveSortOrder() {
+      wx.showLoading({ title: '保存中' });
+      try {
+        // 构建新的 registrations 数组，按 sortableRegistrations 的顺序
+        const newOrder = this.sortableRegistrations.map(r => {
+          const original = (this.match.registrations || []).find(orig => orig.playerId === r.playerId);
+          return original || r;
+        });
+        await db.collection('matches').doc(this.matchId).update({
+          data: { registrations: newOrder }
+        });
+        this.match.registrations = newOrder;
+        this.isSortingMode = false;
+        this.sortableRegistrations = [];
+        uni.showToast({ title: '排序已保存' });
+        this.loadMatch();
+      } catch (e) {
+        console.error('保存排序失败', e);
+        uni.showToast({ title: '保存失败', icon: 'none' });
+      }
+      wx.hideLoading();
     },
 
     async toggleRegistration() {
@@ -594,27 +888,31 @@ export default {
 
     async uploadScreenshot() {
       try {
-        const { tempFilePaths } = await wx.chooseImage({ count: 1, sourceType: ['album', 'camera'] });
-        const tempFilePath = tempFilePaths[0];
+        const res = await uni.chooseImage({ count: 1, sourceType: ['album'] });
+        const tempFilePath = res.tempFilePaths[0];
         
-        wx.showLoading({ title: '上传中' });
-        const uploadRes = await wx.cloud.uploadFile({
-          cloudPath: `screenshots/${this.matchId}/${this.currentPlayerId}_${Date.now()}.jpg`,
-          filePath: tempFilePath
-        });
-        
-        const { result } = await wx.cloud.callFunction({
-          name: 'registerMatch',
-          data: { action: 'uploadScreenshot', matchId: this.matchId, playerId: this.currentPlayerId, screenshot: uploadRes.fileID }
-        });
-        
-        if (result.success) { uni.showToast({ title: '截图上传成功' }); this.loadMatch(); }
-        else { uni.showToast({ title: result.error || '上传失败', icon: 'none' }); }
-      } catch (e) { 
-        console.error('上传截图失败', e);
-        uni.showToast({ title: '上传失败', icon: 'none' }); 
+        uni.showLoading({ title: '上传中' });
+        try {
+          const uploadRes = await wx.cloud.uploadFile({
+            cloudPath: `screenshots/${this.matchId}/${this.currentPlayerId}_${Date.now()}.jpg`,
+            filePath: tempFilePath
+          });
+          
+          const { result } = await wx.cloud.callFunction({
+            name: 'registerMatch',
+            data: { action: 'uploadScreenshot', matchId: this.matchId, playerId: this.currentPlayerId, screenshot: uploadRes.fileID }
+          });
+          
+          if (result.success) { uni.showToast({ title: '截图上传成功' }); this.loadMatch(); }
+          else { uni.showToast({ title: result.error || '上传失败', icon: 'none' }); }
+        } catch (e) { 
+          console.error('上传截图失败', e);
+          uni.showToast({ title: '上传失败', icon: 'none' }); 
+        }
+        uni.hideLoading();
+      } catch (e) {
+        console.log('选择图片取消', e);
       }
-      wx.hideLoading();
     },
 
     async confirmTeam() {
@@ -652,7 +950,7 @@ export default {
     },
 
     async changeOwner() {
-      const available = this.registrations.filter(r => r.playerId && r.playerId !== this.match.ownerId);
+      const available = this.rawRegistrations.filter(r => r.playerId && r.playerId !== this.match.ownerId);
       if (available.length === 0) { uni.showToast({ title: '暂无报名人员', icon: 'none' }); return; }
       this.pickerTitle = '选择场主';
       this.pickerPlayers = available;
@@ -670,7 +968,7 @@ export default {
     async addAssistant() {
       const currentIds = this.match?.assistantIds || [];
       if (currentIds.length >= 4) { uni.showToast({ title: '护法最多4人', icon: 'none' }); return; }
-      const available = this.registrations.filter(r => r.playerId && r.playerId !== this.match.ownerId && !currentIds.includes(r.playerId));
+      const available = this.rawRegistrations.filter(r => r.playerId && r.playerId !== this.match.ownerId && !currentIds.includes(r.playerId));
       if (available.length === 0) { uni.showToast({ title: '没有可添加的护法人选', icon: 'none' }); return; }
       this.pickerTitle = '添加护法';
       this.pickerPlayers = available;
@@ -762,35 +1060,30 @@ export default {
       }
     },
 
-    previewScreenshot(fileID) {
+    async previewScreenshot(fileID) {
       if (!fileID) { uni.showToast({ title: '无截图', icon: 'none' }); return; }
       
       wx.showLoading({ title: '加载截图中' });
       
-      wx.cloud.getTempFileURL({
-        fileList: [fileID],
-        success: (res) => {
-          wx.hideLoading();
-          const file = res.fileList[0];
-          if (!file || file.status !== 0 || !file.tempFileURL) {
-            let errMsg = '截图获取失败';
-            if (file && file.errMsg === 'STORAGE_EXCEED_AUTHORITY') {
-              errMsg = '截图文件已删除或过期';
-            } else if (file && file.errMsg) {
-              errMsg = file.errMsg;
-            }
-            uni.showToast({ title: errMsg, icon: 'none' });
-            return;
-          }
-          this.previewImageUrl = file.tempFileURL;
+      try {
+        const { result } = await wx.cloud.callFunction({
+          name: 'getScreenshotURL',
+          data: { fileID }
+        });
+        
+        wx.hideLoading();
+        
+        if (result.success) {
+          this.previewImageUrl = result.url;
           this.showImagePreview = true;
-        },
-        fail: (err) => {
-          wx.hideLoading();
-          console.error('getTempFileURL fail:', err);
-          uni.showToast({ title: '截图获取失败', icon: 'none' });
+        } else {
+          uni.showToast({ title: result.error || '截图获取失败', icon: 'none' });
         }
-      });
+      } catch (e) {
+        wx.hideLoading();
+        console.error('获取截图失败', e);
+        uni.showToast({ title: '截图获取失败', icon: 'none' });
+      }
     },
 
     async testNotify(type) {
@@ -805,9 +1098,47 @@ export default {
     isInTeamA(playerId) { return (this.match.teamA?.players || []).includes(playerId); },
     isInTeamB(playerId) { return (this.match.teamB?.players || []).includes(playerId); },
     getEventTeamColor(playerId) {
-      if (this.isInTeamA(playerId)) return this.match.teamA?.color || '#3b82f6';
-      if (this.isInTeamB(playerId)) return this.match.teamB?.color || '#ef4444';
-      return '#999';
+      if (this.isInTeamA(playerId)) return this.getTeamDotColor(this.match.teamA);
+      if (this.isInTeamB(playerId)) return this.getTeamDotColor(this.match.teamB);
+      return '#9ca3af';
+    },
+    getTeamDotColor(team) {
+      const colorName = String(team?.color || team?.name || '').trim().toLowerCase();
+      if (colorName.includes('白') || colorName.includes('white')) return '#e5e7eb';
+      if (colorName.includes('黑') || colorName.includes('black')) return '#1f2937';
+      if (colorName.includes('灰') || colorName.includes('grey') || colorName.includes('gray')) return '#6b7280';
+      if (colorName.includes('红') || colorName.includes('red')) return '#dc2626';
+      if (colorName.includes('橙') || colorName.includes('orange')) return '#f97316';
+      if (colorName.includes('黄') || colorName.includes('yellow')) return '#facc15';
+      if (colorName.includes('绿') || colorName.includes('green')) return '#16a34a';
+      if (colorName.includes('青') || colorName.includes('cyan') || colorName.includes('teal')) return '#06b6d4';
+      if (colorName.includes('蓝') || colorName.includes('blue')) return '#3b82f6';
+      if (colorName.includes('紫') || colorName.includes('purple') || colorName.includes('violet')) return '#9333ea';
+      if (colorName.includes('粉') || colorName.includes('pink') || colorName.includes('玫')) return '#ec4899';
+      if (/^#[0-9a-f]{3,8}$/i.test(colorName)) return colorName;
+      return '#9ca3af';
+    },
+    getTeamAGoals(m) {
+      const aPlayers = new Set(m.teamA?.players || []);
+      const allEvents = m.events || [];
+      const assistEvents = allEvents.filter(e => e.type === 'assist');
+      return allEvents
+        .filter(e => (e.type === 'goal' && aPlayers.has(e.playerId)) || (e.type === 'own_goal' && !aPlayers.has(e.playerId)))
+        .map(g => {
+          const assist = assistEvents.find(a => a.assistById === g.playerId && a.minute === g.minute);
+          return { ...g, assistById: assist ? assist.playerId : g.assistById, isOwnGoal: g.type === 'own_goal' };
+        });
+    },
+    getTeamBGoals(m) {
+      const bPlayers = new Set(m.teamB?.players || []);
+      const allEvents = m.events || [];
+      const assistEvents = allEvents.filter(e => e.type === 'assist');
+      return allEvents
+        .filter(e => (e.type === 'goal' && bPlayers.has(e.playerId)) || (e.type === 'own_goal' && !bPlayers.has(e.playerId)))
+        .map(g => {
+          const assist = assistEvents.find(a => a.assistById === g.playerId && a.minute === g.minute);
+          return { ...g, assistById: assist ? assist.playerId : g.assistById, isOwnGoal: g.type === 'own_goal' };
+        });
     },
     formatTime(dateStr) {
       if (!dateStr) return '';
@@ -815,55 +1146,47 @@ export default {
       return `${d.getMonth()+1}月${d.getDate()}日 ${d.getHours()}:${d.getMinutes().toString().padStart(2,'0')}`;
     },
     
-    async loadPosts() {
-      try { const { result } = await wx.cloud.callFunction({ name: 'getPosts', data: { matchId: this.matchId } }); this.posts = result.posts || []; }
-      catch (e) { console.error('加载贴图失败', e); }
+    
+    async adminRegister() {
+      const registeredIds = new Set((this.match.registrations || []).filter(r => r.status !== 'cancelled').map(r => r.playerId));
+      const available = this.allPlayers.filter(p => !registeredIds.has(p._id));
+      if (available.length === 0) { uni.showToast({ title: '没有可代报名的球员', icon: 'none' }); return; }
+      this.pickerTitle = '代报名';
+      this.pickerPlayers = available.map(p => ({ playerId: p._id, player: p }));
+      this.pickerCallback = async (playerId) => {
+        wx.showLoading({ title: '报名中' });
+        try {
+          const { result } = await wx.cloud.callFunction({
+            name: 'registerMatch', data: { action: 'adminAdd', matchId: this.matchId, playerId }
+          });
+          if (result.success) { uni.showToast({ title: '代报名成功' }); this.loadMatch(); }
+          else { uni.showToast({ title: result.error || '代报名失败', icon: 'none' }); }
+        } catch (e) { uni.showToast({ title: '代报名失败', icon: 'none' }); }
+        wx.hideLoading();
+      };
+      this.showPlayerPicker = true;
     },
     
-    async uploadPostImage() {
-      uni.chooseImage({
-        count: 1, sizeType: ['compressed'],
-        sourceType: ['album', 'camera'],
-        success: async (res) => {
-          wx.showLoading({ title: '上传中' });
-          try {
-            const tempFilePath = res.tempFilePaths[0];
-            const cloudPath = `posts/${this.matchId}/${Date.now()}.jpg`;
-            const uploadRes = await wx.cloud.uploadFile({ cloudPath, filePath: tempFilePath });
-            await wx.cloud.callFunction({ name: 'createPost', data: { matchId: this.matchId, imageUrl: uploadRes.fileID } });
-            uni.showToast({ title: '上传成功' }); this.loadPosts();
-          } catch (e) { uni.showToast({ title: '上传失败', icon: 'none' }); }
-          wx.hideLoading();
-        }
-      });
-    },
-    
-    async deletePost(postId) {
+    async addTempPlayer() {
       uni.showModal({
-        title: '确认删除', content: '确定删除这张贴图？', confirmColor: '#dc2626',
+        title: '添加临时球员',
+        editable: true,
+        placeholderText: '请输入临时球员昵称',
         success: async (res) => {
-          if (res.confirm) {
-            try { await wx.cloud.callFunction({ name: 'deletePost', data: { postId } }); uni.showToast({ title: '已删除' }); this.loadPosts(); }
-            catch (e) { uni.showToast({ title: '删除失败', icon: 'none' }); }
+          if (res.confirm && res.content && res.content.trim()) {
+            wx.showLoading({ title: '添加中' });
+            try {
+              const { result } = await wx.cloud.callFunction({
+                name: 'registerMatch', data: { action: 'addTempPlayer', matchId: this.matchId, tempPlayer: { nickname: res.content.trim() } }
+              });
+              if (result.success) { uni.showToast({ title: '已添加临时球员' }); this.loadMatch(); }
+              else { uni.showToast({ title: result.error || '添加失败', icon: 'none' }); }
+            } catch (e) { uni.showToast({ title: '添加失败', icon: 'none' }); }
+            wx.hideLoading();
           }
         }
       });
     },
-    
-    async sendComment(post) {
-      if (!post.commentText || !post.commentText.trim()) return;
-      try {
-        await wx.cloud.callFunction({ name: 'addComment', data: { postId: post._id, content: post.commentText.trim() } });
-        post.commentText = ''; this.loadPosts();
-      } catch (e) { uni.showToast({ title: '评论失败', icon: 'none' }); }
-    },
-    
-    async deleteComment(commentId) {
-      try { await wx.cloud.callFunction({ name: 'deleteComment', data: { commentId } }); this.loadPosts(); }
-      catch (e) { uni.showToast({ title: '删除失败', icon: 'none' }); }
-    },
-    
-    previewImage(url) { uni.previewImage({ urls: [url] }); },
     
     async showMVPSelector() {
       const confirmed = (this.match.registrations || []).filter(r => r.status === 'confirmed' || r.status === 'screenshot_uploaded').map(r => r.playerId);
@@ -877,6 +1200,79 @@ export default {
           catch (e) { uni.showToast({ title: '指定失败', icon: 'none' }); }
         }
       });
+    },
+
+    getPlayerGoals(pid) {
+      return (this.match.events || []).filter(e => e.type === 'goal' && e.playerId === pid).length;
+    },
+    getPlayerAssists(pid) {
+      // 兼容新旧两种助攻数据格式
+      // 新格式：goal 事件直接包含 assistById
+      // 旧格式：独立的 assist 事件，playerId 为助攻者
+      return (this.match.events || []).filter(e =>
+        (e.type === 'goal' && e.assistById === pid) ||
+        (e.type === 'assist' && e.playerId === pid)
+      ).length;
+    },
+    getPlayerMatchRating(pid) {
+      const p = this.players[pid];
+      if (!p || !p.ratings) return null;
+      const peer = (p.ratings.peerRatings || []).filter(r => r.matchId === this.matchId);
+      const admin = (p.ratings.adminRatings || []).filter(r => r.matchId === this.matchId);
+      const all = [...peer, ...admin];
+      if (all.length === 0) return null;
+      return all.reduce((s, r) => s + r.score, 0) / all.length;
+    },
+    getPlayerYellows(pid) {
+      return (this.match.events || []).filter(e => e.type === 'yellow' && e.playerId === pid).length;
+    },
+    getPlayerReds(pid) {
+      return (this.match.events || []).filter(e => e.type === 'red' && e.playerId === pid).length;
+    },
+    getPlayerOwnGoals(pid) {
+      return (this.match.events || []).filter(e => (e.type === 'ownGoal' || e.type === 'own_goal') && e.playerId === pid).length;
+    },
+    isMVP(pid) {
+      return (this.match.mvp || []).includes(pid);
+    },
+    getPlayerName(pid) {
+      return this.players[pid]?.nickname || '未知';
+    },
+    toggleCollapse(key) {
+      this.collapsedSections[key] = !this.collapsedSections[key];
+    },
+    async showPeerRatingsModal() {
+      wx.showLoading({ title: '加载中' });
+      // 从所有参赛球员的 ratings 中收集本场比赛的互评
+      const peerMap = new Map();
+      for (const p of Object.values(this.players)) {
+        const peerList = p.ratings?.peerRatings || [];
+        for (const r of peerList) {
+          if (r.matchId === this.matchId && r.fromId && r.score > 0) {
+            const key = r.fromId + '_' + p._id;
+            // 去重：保留最新的（有 createdAt 时按时间）
+            const existing = peerMap.get(key);
+            if (!existing || (r.createdAt && existing.createdAt && r.createdAt > existing.createdAt)) {
+              peerMap.set(key, {
+                fromId: r.fromId,
+                fromName: this.players[r.fromId]?.nickname || '未知',
+                toId: p._id,
+                toName: p.nickname || '未知',
+                score: r.score,
+                createdAt: r.createdAt
+              });
+            }
+          }
+        }
+      }
+      // 按被评人(toId)分组，再按评分人(fromId)排序
+      const allPeer = Array.from(peerMap.values()).sort((a, b) => {
+        if (a.toId !== b.toId) return a.toId.localeCompare(b.toId);
+        return a.fromId.localeCompare(b.fromId);
+      });
+      this.allPeerRatings = allPeer;
+      this.showPeerRatings = true;
+      wx.hideLoading();
     }
   }
 };
@@ -906,16 +1302,6 @@ export default {
 .status-ongoing { background: linear-gradient(135deg, #fef3c7, #fef9c8); color: #92400e; }
 .status-completed { background: linear-gradient(135deg, #dcfce7, #f0fdf4); color: #166534; }
 
-.match-result { display: flex; align-items: center; justify-content: center; margin-top: 20rpx; padding: 24rpx; background: linear-gradient(135deg, #f8fafc, #f0f9ff); border-radius: 16rpx; gap: 12rpx; }
-.team-side { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12rpx; min-width: 0; }
-.team { display: flex; align-items: center; gap: 12rpx; width: 100%; }
-.team-a { justify-content: flex-start; }
-.team-b { justify-content: flex-end; }
-.team-dot { width: 28rpx; height: 28rpx; border-radius: 50%; flex-shrink: 0; border: 3rpx solid #fff; box-shadow: 0 2rpx 6rpx rgba(0,0,0,0.15); }
-.team-color-name { font-size: 28rpx; font-weight: 700; color: #374151; }
-.team-score { font-size: 44rpx; font-weight: 900; color: #1e293b; }
-.vs { font-size: 28rpx; font-weight: 800; color: #94a3b8; flex-shrink: 0; padding: 8rpx 12rpx; background: #f1f5f9; border-radius: 10rpx; }
-
 .new-badge { display: inline-block; background: #ef4444; color: #fff; font-size: 20rpx; padding: 2rpx 10rpx; border-radius: 8rpx; margin-left: 8rpx; font-weight: 700; vertical-align: middle; }
 
 .btn-group { display: flex; gap: 16rpx; margin-top: 20rpx; }
@@ -940,13 +1326,18 @@ export default {
 .owner-action { font-size: 24rpx; color: #3b82f6; padding: 8rpx 18rpx; background: #eff6ff; border-radius: 10rpx; font-weight: 600; }
 
 /* 报名接龙 */
-.reg-list { }
 .reg-item { display: flex; align-items: center; justify-content: space-between; padding: 16rpx 0; border-bottom: 2rpx solid #f1f5f9; }
 .reg-item:last-child { border-bottom: none; }
 .reg-info { flex: 1; min-width: 0; }
 .reg-name-row { display: flex; align-items: center; gap: 8rpx; flex-wrap: wrap; }
 .reg-tags { display: flex; gap: 6rpx; margin-top: 4rpx; flex-wrap: wrap; }
 .reg-right { flex-shrink: 0; }
+.reg-num { font-size: 24rpx; color: #94a3b8; font-weight: 600; min-width: 40rpx; }
+.tag-wl { background: #fef3c7; color: #92400e; }
+.wl-divider { display: flex; align-items: center; gap: 16rpx; padding: 16rpx 0; }
+.wl-line { flex: 1; height: 2rpx; background: #e2e8f0; }
+.wl-text { font-size: 24rpx; color: #94a3b8; font-weight: 600; flex-shrink: 0; }
+.wl-item { background: #f8fafc; opacity: 0.8; }
 
 .reg-actions-row { display: flex; gap: 8rpx; margin-top: 8rpx; flex-wrap: wrap; }
 .btn-upload { background: #dbeafe; color: #2563eb; padding: 6rpx 14rpx; border-radius: 8rpx; font-size: 22rpx; font-weight: 600; }
@@ -971,14 +1362,12 @@ export default {
 .empty-state { text-align: center; padding: 40rpx 0; color: #94a3b8; font-size: 28rpx; }
 
 /* 赛况 */
-.event-list { }
 .event-item { display: flex; align-items: center; gap: 16rpx; padding: 12rpx 0; }
 .event-team-bar { width: 6rpx; height: 40rpx; border-radius: 3rpx; }
 .event-time { font-size: 24rpx; color: #94a3b8; width: 60rpx; font-weight: 600; }
 .event-detail { font-size: 28rpx; color: #1e293b; }
 
 /* 评分 */
-.rating-list { }
 .rating-item { display: flex; justify-content: space-between; padding: 12rpx 0; border-bottom: 2rpx solid #f1f5f9; }
 
 /* MVP */
@@ -987,27 +1376,6 @@ export default {
 .mvp-avatar { width: 48rpx; height: 48rpx; border-radius: 50%; background: linear-gradient(135deg, #eab308, #fbbf24); display: flex; align-items: center; justify-content: center; font-size: 24rpx; font-weight: 800; color: #fff; }
 .mvp-name { font-size: 28rpx; font-weight: 700; color: #854d0e; }
 .admin-mvp-btn { margin-top: 16rpx; padding: 16rpx 0; text-align: center; background: linear-gradient(135deg, #fefce8, #fef9c3); border-radius: 12rpx; font-size: 28rpx; font-weight: 700; color: #eab308; }
-
-/* 贴图 */
-.empty-posts { text-align: center; padding: 40rpx 0; color: #94a3b8; font-size: 26rpx; }
-.post-list { display: flex; flex-direction: column; gap: 24rpx; }
-.post-item { background: #f8fafc; border-radius: 16rpx; padding: 20rpx; }
-.post-header { display: flex; align-items: center; gap: 12rpx; margin-bottom: 16rpx; }
-.post-author { display: flex; align-items: center; gap: 10rpx; flex: 1; }
-.avatar-small { width: 48rpx; height: 48rpx; border-radius: 50%; background: linear-gradient(135deg, #dcfce7, #bbf7d0); display: flex; align-items: center; justify-content: center; font-size: 24rpx; font-weight: 700; color: #166534; }
-.post-name { font-size: 28rpx; font-weight: 700; color: #1e293b; }
-.post-time { font-size: 22rpx; color: #94a3b8; }
-.post-delete { width: 40rpx; height: 40rpx; border-radius: 50%; background: #fee2e2; color: #dc2626; display: flex; align-items: center; justify-content: center; font-size: 24rpx; font-weight: 700; margin-left: auto; }
-.post-image { width: 100%; border-radius: 12rpx; margin-bottom: 16rpx; }
-.comment-section { margin-top: 12rpx; }
-.comment-list { display: flex; flex-direction: column; gap: 10rpx; margin-bottom: 12rpx; }
-.comment-item { display: flex; align-items: flex-start; gap: 8rpx; font-size: 26rpx; padding: 10rpx 14rpx; background: #fff; border-radius: 10rpx; }
-.comment-author { font-weight: 700; color: #475569; flex-shrink: 0; }
-.comment-content { color: #334155; flex: 1; word-break: break-all; }
-.comment-delete { color: #dc2626; font-size: 22rpx; padding: 4rpx 8rpx; }
-.comment-input-row { display: flex; gap: 12rpx; align-items: center; }
-.comment-input { flex: 1; height: 64rpx; background: #fff; border-radius: 12rpx; padding: 0 16rpx; font-size: 26rpx; border: 2rpx solid #e2e8f0; }
-.comment-send { background: linear-gradient(135deg, #16a34a, #22c55e); color: #fff; padding: 14rpx 28rpx; border-radius: 12rpx; font-size: 26rpx; font-weight: 700; }
 
 /* 自定义球员选择器 */
 .picker-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
@@ -1028,4 +1396,65 @@ export default {
 .image-preview-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 2000; padding: 40rpx; }
 .image-preview-img { width: 100%; max-height: 80vh; }
 .image-preview-close { color: #fff; font-size: 28rpx; margin-top: 20rpx; padding: 16rpx 40rpx; background: rgba(255,255,255,0.2); border-radius: 12rpx; }
+
+/* 比分牌：与场次列表一致 */
+.match-result { display: flex; align-items: flex-start; justify-content: space-between; margin-top: 20rpx; padding: 24rpx; background: linear-gradient(135deg, #f8fafc, #f0f9ff); border-radius: 16rpx; gap: 12rpx; }
+.team-side { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 12rpx; min-width: 0; }
+.team { display: flex; align-items: center; gap: 12rpx; width: 100%; }
+.team-a { justify-content: flex-start; }
+.team-b { justify-content: flex-end; }
+.team-dot { width: 28rpx; height: 28rpx; border-radius: 50%; flex-shrink: 0; border: 3rpx solid #fff; box-shadow: 0 2rpx 6rpx rgba(0,0,0,0.15); }
+.team-name { font-size: 28rpx; font-weight: 700; color: #374151; }
+.team-score { font-size: 44rpx; font-weight: 900; color: #1e293b; }
+.vs { font-size: 28rpx; font-weight: 800; color: #94a3b8; flex-shrink: 0; align-self: center; padding: 8rpx 12rpx; background: #f1f5f9; border-radius: 10rpx; }
+.team-goals { width: 100%; display: flex; flex-direction: column; gap: 8rpx; }
+.team-goal-item { display: flex; align-items: center; gap: 8rpx; font-size: 24rpx; padding: 6rpx 0; }
+.goal-icon { font-size: 22rpx; }
+.goal-player { color: #374151; font-weight: 600; }
+.own-goal-tag { color: #dc2626; font-size: 20rpx; margin-left: 4rpx; }
+.goal-assist { color: #3b82f6; font-weight: 600; }
+.goal-minute { color: #94a3b8; font-size: 22rpx; margin-left: auto; }
+
+/* 两队队员 */
+.lineups-header { display: flex; gap: 16rpx; margin-bottom: 16rpx; }
+.lineup-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10rpx; padding: 16rpx 0; background: #f1f5f9; border-radius: 12rpx; font-size: 28rpx; font-weight: 600; color: #64748b; }
+.lineup-tab.active { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+.lineup-dot { width: 20rpx; height: 20rpx; border-radius: 50%; }
+.lineup-item { display: flex; align-items: center; justify-content: space-between; padding: 14rpx 0; border-bottom: 2rpx solid #f1f5f9; }
+.lineup-item:last-child { border-bottom: none; }
+.lineup-player { font-size: 28rpx; color: #1e293b; font-weight: 600; }
+.lineup-stats { display: flex; align-items: center; gap: 12rpx; }
+.stat-goal { font-size: 24rpx; color: #dc2626; font-weight: 700; }
+.stat-assist { font-size: 24rpx; color: #2563eb; font-weight: 700; }
+.stat-rating { font-size: 24rpx; color: #f59e0b; font-weight: 700; background: #fef3c7; padding: 4rpx 12rpx; border-radius: 8rpx; }
+
+/* 评分列表统计标注 */
+.rating-left { display: flex; flex-direction: column; gap: 4rpx; }
+.rating-name { font-size: 28rpx; color: #1e293b; font-weight: 600; }
+.rating-badges { display: flex; gap: 8rpx; flex-wrap: wrap; }
+.badge-goal { font-size: 22rpx; color: #dc2626; font-weight: 700; }
+.badge-assist { font-size: 22rpx; color: #2563eb; font-weight: 700; }
+.badge-yellow { font-size: 22rpx; color: #ca8a04; font-weight: 700; }
+.badge-red { font-size: 22rpx; color: #dc2626; font-weight: 700; }
+.badge-own { font-size: 22rpx; color: #7c3aed; font-weight: 700; }
+.rating-right { display: flex; align-items: center; gap: 12rpx; }
+.mvp-badge { font-size: 20rpx; color: #eab308; font-weight: 800; background: linear-gradient(135deg, #fefce8, #fef9c3); padding: 4rpx 10rpx; border-radius: 8rpx; }
+.rating-score { font-size: 32rpx; color: #f59e0b; font-weight: 800; }
+
+.collapse-arrow { font-size: 28rpx; color: #94a3b8; } /* 折叠箭头 */
+
+.section-count-line { font-size: 26rpx; color: #94a3b8; font-weight: 600; margin-bottom: 12rpx; } /* 报名接龙顶部人数 */
+
+/* 互评弹窗 */
+.peer-summary { font-size: 26rpx; color: #94a3b8; padding: 16rpx 28rpx; border-bottom: 2rpx solid #f1f5f9; }
+.peer-group-header { font-size: 30rpx; font-weight: 700; color: #1e293b; padding: 16rpx 28rpx 8rpx; background: #f8fafc; }
+.peer-group-body { padding: 0 28rpx; }
+.peer-rating-item { display: flex; align-items: center; gap: 12rpx; padding: 16rpx 0; border-bottom: 2rpx solid #f8fafc; }
+.peer-from { font-size: 28rpx; color: #4b5563; width: 160rpx; }
+.peer-arrow { font-size: 24rpx; color: #94a3b8; }
+.peer-score { font-size: 28rpx; color: #f59e0b; font-weight: 700; margin-left: auto; }
+
+/* 手动排序 */
+.sort-handle { font-size: 28rpx; padding: 4rpx 8rpx; cursor: pointer; }
+.sort-handle:active { opacity: 0.5; }
 </style>

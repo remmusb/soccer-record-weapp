@@ -22,7 +22,7 @@ async function checkText(content, openid) {
 exports.main = async (event, context) => {
   const { OPENID } = cloud.getWXContext();
   const db = cloud.database();
-  const { name, nickname, positions, initialRating, birthDate, avatar, allowRating, kttLast4, height, weight, foot } = event;
+  const { name, nickname, positions, initialRating, birthDate, avatar, allowRating, kttLast4, height, weight, foot, preferredPosition, hideBirthDate, hideHeight, hideWeight, hideFoot } = event;
 
   if (!nickname || !nickname.trim()) {
     return { success: false, error: '昵称必填' };
@@ -55,7 +55,12 @@ exports.main = async (event, context) => {
         height: height || '',
         weight: weight || '',
         foot: foot || '',
+        preferredPosition: preferredPosition || '',
         positions: positions || [],
+        hideBirthDate: hideBirthDate || false,
+        hideHeight: hideHeight || false,
+        hideWeight: hideWeight || false,
+        hideFoot: hideFoot || false,
         avatar: avatar || '',
         allowRating: allowRatingVal,
         ratings: {
