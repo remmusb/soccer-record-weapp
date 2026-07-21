@@ -145,6 +145,10 @@ export default {
           if (e.type === 'goal' && e.assistById === playerId) {
             assists++;
           }
+          // 兼容旧格式：独立的 assist 事件
+          if (e.type === 'assist' && e.playerId === playerId) {
+            assists++;
+          }
         }
       }
 
@@ -208,8 +212,18 @@ export default {
         const { result: playerResult } = await wx.cloud.callFunction({ name: 'getPlayers' });
         const players = playerResult.players || [];
 
-        const matchesRes = await db.collection('matches').where({ status: 'completed' }).limit(100).get();
-        this.completedMatches = matchesRes.data;
+        // 分页获取所有已完成的比赛（客户端 limit 最大 100，需要循环）
+        const LIMIT = 100;
+        let completedMatches = [];
+        let skip = 0;
+        while (true) {
+          const { data } = await db.collection('matches').where({ status: 'completed' }).limit(LIMIT).skip(skip).get();
+          if (data.length === 0) break;
+          completedMatches = completedMatches.concat(data);
+          if (data.length < LIMIT) break;
+          skip += LIMIT;
+        }
+        this.completedMatches = completedMatches;
 
         const goalMap = {};
         const assistMap = {};
@@ -220,6 +234,10 @@ export default {
             }
             if (e.type === 'goal' && e.assistById) {
               assistMap[e.assistById] = (assistMap[e.assistById] || 0) + 1;
+            }
+            // 兼容旧格式：独立的 assist 事件
+            if (e.type === 'assist' && e.playerId) {
+              assistMap[e.playerId] = (assistMap[e.playerId] || 0) + 1;
             }
           }
         }

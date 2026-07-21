@@ -21,6 +21,31 @@ function isBackline(player) {
 
 exports.main = async (event, context) => {
   try {
+    // 分页获取所有球员（默认限制100条）
+    let players = [];
+    let skip = 0;
+    const LIMIT = 100;
+    while (true) {
+      const { data } = await db.collection('players').limit(LIMIT).skip(skip).get();
+      if (data.length === 0) break;
+      players = players.concat(data);
+      if (data.length < LIMIT) break;
+      skip += LIMIT;
+    }
+    
+    // 分页获取所有比赛（默认限制100条）
+    let allMatches = [];
+    skip = 0;
+    while (true) {
+      const { data } = await db.collection('matches').limit(LIMIT).skip(skip).get();
+      if (data.length === 0) break;
+      allMatches = allMatches.concat(data);
+      if (data.length < LIMIT) break;
+      skip += LIMIT;
+    }
+    
+    const completedMatches = allMatches.filter(m => m.status === 'completed');
+  try {
     const { data: players } = await db.collection('players').get();
     const { data: allMatches } = await db.collection('matches').get();
     const completedMatches = allMatches.filter(m => m.status === 'completed');
@@ -59,8 +84,10 @@ exports.main = async (event, context) => {
       // 只有已结束的比赛才统计比赛数据（出场、进球、胜负、MVP等）
       if (m.status !== 'completed') continue;
 
-      const confirmed = (m.registrations || []).filter(r => r.status === 'confirmed' && !r.isTempPlayer);
-      const registeredIds = confirmed.map(r => r.playerId);
+      // 出场以分队名单为准，排除临时球员，确保pid是字符串
+      const teamAPlayers = ((m.teamA || {}).players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_'));
+      const teamBPlayers = ((m.teamB || {}).players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_'));
+      const registeredIds = [...new Set([...teamAPlayers, ...teamBPlayers])];
       const aWin = ((m.teamA || {}).score || 0) > ((m.teamB || {}).score || 0);
       const bWin = ((m.teamB || {}).score || 0) > ((m.teamA || {}).score || 0);
       const draw = ((m.teamA || {}).score || 0) === ((m.teamB || {}).score || 0);
@@ -102,26 +129,24 @@ exports.main = async (event, context) => {
       }
 
       for (const e of (m.events || [])) {
-        if (!statsMap[e.playerId]) continue;
-        if (e.type === 'goal') { statsMap[e.playerId].goals++; matchPlayerStats[e.playerId].goals++; }
-        if (e.type === 'assist') { statsMap[e.playerId].assists++; matchPlayerStats[e.playerId].assists++; }
-        if (e.type === 'yellow') statsMap[e.playerId].yellowCards++;
-        if (e.type === 'red') statsMap[e.playerId].redCards++;
-        if (e.type === 'own_goal') statsMap[e.playerId].ownGoals++;
-        if (e.type === 'penalty') { statsMap[e.playerId].goals++; matchPlayerStats[e.playerId].goals++; }
+        // 确保 playerId 是有效字符串
+        const evtPid = e.playerId;
+        if (!evtPid || typeof evtPid !== 'string') continue;
+        if (!statsMap[evtPid]) continue;
+        // 确保 matchPlayerStats 中有该球员的条目（即使不在分队名单中）
+        if (!matchPlayerStats[evtPid]) {
+          matchPlayerStats[evtPid] = { score: 5, goals: 0, assists: 0 };
+        }
+        if (e.type === 'goal') { statsMap[evtPid].goals++; matchPlayerStats[evtPid].goals++; }
+        if (e.type === 'assist') { statsMap[evtPid].assists++; matchPlayerStats[evtPid].assists++; }
+        if (e.type === 'yellow') statsMap[evtPid].yellowCards++;
+        if (e.type === 'red') statsMap[evtPid].redCards++;
+        if (e.type === 'own_goal') statsMap[evtPid].ownGoals++;
+        if (e.type === 'penalty') { statsMap[evtPid].goals++; matchPlayerStats[evtPid].goals++; }
       }
       
       // 计算该场比赛的 MVP
       const mvpIds = calculateMVP(matchPlayerStats);
-      // MVP 已在评分关闭时计算并写入 matches，此处跳过重复更新以优化性能
-      // 如需实时重新计算 MVP，可取消下方注释
-      /*
-      if (mvpIds.length > 0) {
-        await db.collection('matches').doc(m._id).update({
-          data: { mvp: mvpIds }
-        });
-      }
-      */
       // 累计每个 MVP 球员的 MVP 次数
       for (const mvpId of mvpIds) {
         if (statsMap[mvpId]) statsMap[mvpId].mvp++;
@@ -213,26 +238,27 @@ exports.main = async (event, context) => {
 
     return { success: true, updated: players.length, results };
   } catch (e) {
-    console.error(e);
-    return { success: false, error: e.message };
+    console.error('recalculateStats 错误:', e);
+    console.error('错误堆栈:', e.stack);
+    return { success: false, error: e.message, stack: e.stack };
   }
 };
 
 // 计算单场比赛 MVP
 function calculateMVP(matchPlayerStats) {
-  const entries = Object.entries(matchPlayerStats);
+  const entries = Object.entries(matchPlayerStats).filter(e => e[1] && typeof e[1] === 'object');
   if (entries.length === 0) return [];
   
   // 1. 按评分排序
-  entries.sort((a, b) => b[1].score - a[1].score);
-  const highestScore = entries[0][1].score;
-  const topByScore = entries.filter(e => e[1].score === highestScore);
+  entries.sort((a, b) => (b[1]?.score || 0) - (a[1]?.score || 0));
+  const highestScore = entries[0][1]?.score || 0;
+  const topByScore = entries.filter(e => (e[1]?.score || 0) === highestScore);
   
   // 2. 如果评分相同，比较进球+助攻
   if (topByScore.length > 1) {
-    topByScore.sort((a, b) => (b[1].goals + b[1].assists) - (a[1].goals + a[1].assists));
-    const highestGA = topByScore[0][1].goals + topByScore[0][1].assists;
-    const topByGA = topByScore.filter(e => (e[1].goals + e[1].assists) === highestGA);
+    topByScore.sort((a, b) => ((b[1]?.goals || 0) + (b[1]?.assists || 0)) - ((a[1]?.goals || 0) + (a[1]?.assists || 0)));
+    const highestGA = (topByScore[0][1]?.goals || 0) + (topByScore[0][1]?.assists || 0);
+    const topByGA = topByScore.filter(e => ((e[1]?.goals || 0) + (e[1]?.assists || 0)) === highestGA);
     
     // 3. 如果还不能唯一，则都为 MVP
     return topByGA.map(e => e[0]);

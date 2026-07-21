@@ -129,32 +129,24 @@ export default {
   computed: {
     allPlayers() {
       if (!this.match) return [];
-      // 排除临时队员（isTempPlayer 或 playerId 以 temp_ 开头）和未确认球员
-      const tempIds = new Set((this.match.registrations || [])
-        .filter(r => r.isTempPlayer || (r.playerId && r.playerId.startsWith('temp_')))
-        .map(r => r.playerId));
-      // 名单中所有已确认（confirmed）球员 + 分队球员 + 赛况球员
+      // 评分权限以分队名单为准，排除临时球员
       const ids = [...new Set([
-        ...((this.match.registrations || [])
-          .filter(r => !r.isTempPlayer && !(r.playerId && r.playerId.startsWith('temp_')) && r.status === 'confirmed')
-          .map(r => r.playerId)),
         ...(this.match.teamA?.players || []),
-        ...(this.match.teamB?.players || []),
-        ...((this.match.events || []).map(e => e.playerId))
-      ].filter(id => id && !id.startsWith('temp_') && !tempIds.has(id)))];
-      const players = ids.map(id => this.players[id]).filter(Boolean);
-      return players;
+        ...(this.match.teamB?.players || [])
+      ].filter(id => id && typeof id === 'string' && !id.startsWith('temp_')))].filter(pid => this.players[pid]);
+      return ids.map(id => this.players[id]).filter(Boolean);
     },
     teammates() {
       // 只显示允许评分的队友（管理员除外）
       return this.allPlayers.filter(p => p._id !== this.currentPlayerId && p.allowRating !== false && !p._id.startsWith('temp_'));
     },
     isPlayer() {
-      // 只有已确认报名（confirmed）的非临时球员才能评分
-      const confirmedIds = (this.match.registrations || [])
-        .filter(r => !r.isTempPlayer && !(r.playerId && r.playerId.startsWith('temp_')) && r.status === 'confirmed')
-        .map(r => r.playerId);
-      return confirmedIds.includes(this.currentPlayerId) && !this.currentPlayerId.startsWith('temp_');
+      // 评分权限以分队名单为准
+      const teamPlayers = [...new Set([
+        ...(this.match.teamA?.players || []),
+        ...(this.match.teamB?.players || [])
+      ])];
+      return teamPlayers.includes(this.currentPlayerId) && this.currentPlayerId && !this.currentPlayerId.startsWith('temp_');
     },
     isRateWindowOpen() {
       // 评分窗口由管理员控制开关
@@ -208,7 +200,10 @@ export default {
           // 纯客户端方案：通过 getPlayers 获取所有球员，然后在客户端过滤
           let pList = [];
           try {
-            const { result: allPlayersRes } = await wx.cloud.callFunction({ name: 'getPlayers' });
+            const { result: allPlayersRes } = await wx.cloud.callFunction({ 
+              name: 'getPlayers',
+              data: { playerIds }
+            });
             if (allPlayersRes && allPlayersRes.players) {
               pList = allPlayersRes.players.filter(p => playerIds.includes(p._id));
             }

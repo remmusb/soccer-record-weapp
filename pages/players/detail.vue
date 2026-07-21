@@ -230,6 +230,10 @@ export default {
           if (e.type === 'goal' && e.assistById === this.playerId) {
             assists++;
           }
+          // 兼容旧格式：独立的 assist 事件
+          if (e.type === 'assist' && e.playerId === this.playerId) {
+            assists++;
+          }
         }
       }
       const ownerFiltered = this.filteredOwnerMatches;
@@ -282,6 +286,10 @@ export default {
             if (e.type === 'red') redCount++;
           }
           if (e.type === 'goal' && e.assistById === playerId) {
+            assists++;
+          }
+          // 兼容旧格式：独立的 assist 事件
+          if (e.type === 'assist' && e.playerId === playerId) {
             assists++;
           }
         }
@@ -360,11 +368,17 @@ export default {
         this.player = data;
 
         // 查询所有已结束的比赛（不限制报名记录，确保包含被直接分队的比赛）
-        const { data: allCompletedMatches } = await db.collection('matches')
-          .where({ status: 'completed' })
-          .limit(100)
-          .get();
-
+        // 分页获取所有已结束的比赛（客户端 limit 最大 100，需要循环）
+        const LIMIT = 100;
+        let allCompletedMatches = [];
+        let skip = 0;
+        while (true) {
+          const { data } = await db.collection('matches').where({ status: 'completed' }).limit(LIMIT).skip(skip).get();
+          if (data.length === 0) break;
+          allCompletedMatches = allCompletedMatches.concat(data);
+          if (data.length < LIMIT) break;
+          skip += LIMIT;
+        }
         // 同时查询该球员的报名记录（用于显示报名状态）
         const { data: registeredMatches } = await db.collection('matches')
           .where({ 'registrations.playerId': this.playerId })

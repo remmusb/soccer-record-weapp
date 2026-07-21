@@ -104,7 +104,6 @@ export default {
       return [...this.players]
         .filter(p => p.allowRating !== false && !p._id.startsWith('temp_'))
         .map(p => {
-          // 筛选该球员实际参加的比赛
           const playerMatches = this.completedMatches.filter(m => {
             const inA = (m.teamA?.players || []).includes(p._id);
             const inB = (m.teamB?.players || []).includes(p._id);
@@ -134,7 +133,6 @@ export default {
     }
   },
   methods: {
-    // 评分计算函数（与 detail.vue / list.vue 完全一致）
     calculatePlayerRating(player, completedMatches) {
       const playerId = player._id;
       const FRONT_POSITIONS = ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];
@@ -166,6 +164,9 @@ export default {
             if (e.type === 'red') redCount++;
           }
           if (e.type === 'goal' && e.assistById === playerId) {
+            assists++;
+          }
+          if (e.type === 'assist' && e.playerId === playerId) {
             assists++;
           }
         }
@@ -227,10 +228,18 @@ export default {
       try {
         const { result: playerResult } = await wx.cloud.callFunction({ name: 'getPlayers' });
         this.players = playerResult.players || [];
-        const matchesRes = await db.collection('matches').where({ status: 'completed' }).limit(100).get();
-        this.completedMatches = matchesRes.data;
+        const LIMIT = 100;
+        let completedMatches = [];
+        let skip = 0;
+        while (true) {
+          const { data } = await db.collection('matches').where({ status: 'completed' }).limit(LIMIT).skip(skip).get();
+          if (data.length === 0) break;
+          completedMatches = completedMatches.concat(data);
+          if (data.length < LIMIT) break;
+          skip += LIMIT;
+        }
+        this.completedMatches = completedMatches;
 
-        // 实时计算进球和助攻
         const goalMap = {};
         const assistMap = {};
         for (const m of this.completedMatches) {
@@ -238,26 +247,16 @@ export default {
             if (e.type === 'goal' && e.playerId) {
               goalMap[e.playerId] = (goalMap[e.playerId] || 0) + 1;
             }
-            // 只统计进球事件中的助攻者（assistById），与 detail.vue 一致
             if (e.type === 'goal' && e.assistById) {
               assistMap[e.assistById] = (assistMap[e.assistById] || 0) + 1;
+            }
+            if (e.type === 'assist' && e.playerId) {
+              assistMap[e.playerId] = (assistMap[e.playerId] || 0) + 1;
             }
           }
         }
         this.goalMap = goalMap;
         this.assistMap = assistMap;
-
-        // 对目标球员直接查询数据库，确保数据与detail.vue一致
-        try {
-          const { data } = await db.collection('players').doc('ac938a9e6a45f32a01117cff57b02a65').get();
-          // 替换players数组中的目标球员数据
-          const idx = this.players.findIndex(p => p._id === 'ac938a9e6a45f32a01117cff57b02a65');
-          if (idx >= 0) {
-            this.players[idx] = data;
-          }
-        } catch (e) {
-          console.log('目标球员直接查询失败');
-        }
       } catch (e) {
         console.error('加载失败', e);
       }

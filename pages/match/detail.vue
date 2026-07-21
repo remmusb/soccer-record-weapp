@@ -473,18 +473,17 @@ export default {
         const protectedA = isProtected(a) ? 1 : 0;
         const protectedB = isProtected(b) ? 1 : 0;
         if (protectedA !== protectedB) return protectedB - protectedA;
-        // 2. 同优先级内按状态排序：confirmed > screenshot_uploaded > pending_screenshot > cancelled
-        const statusPriority = { confirmed: 4, screenshot_uploaded: 3, pending_screenshot: 2, cancelled: 1 };
-        const priorityA = statusPriority[a.status] || 0;
-        const priorityB = statusPriority[b.status] || 0;
-        if (priorityA !== priorityB) return priorityB - priorityA;
-        // 3. confirmed 状态按 confirmedAt 时间排序（先确认的在前）
-        if (a.status === 'confirmed' && b.status === 'confirmed') {
-          const timeA = a.confirmedAt ? new Date(a.confirmedAt).getTime() : 0;
-          const timeB = b.confirmedAt ? new Date(b.confirmedAt).getTime() : 0;
-          if (timeA !== timeB) return timeA - timeB;
-        }
-        // 4. 其他状态按报名时间排序
+
+        // 2. 取消的排最后
+        if (a.status === 'cancelled' && b.status !== 'cancelled') return 1;
+        if (b.status === 'cancelled' && a.status !== 'cancelled') return -1;
+
+        // 3. 有截图的（confirmed / screenshot_uploaded）> 没有截图的（pending_screenshot）
+        const hasScreenshotA = a.status === 'confirmed' || a.status === 'screenshot_uploaded';
+        const hasScreenshotB = b.status === 'confirmed' || b.status === 'screenshot_uploaded';
+        if (hasScreenshotA !== hasScreenshotB) return hasScreenshotB ? 1 : -1;
+
+        // 4. 同组内严格按照报名时间排序（包括临时球员/代报名）
         const regTimeA = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
         const regTimeB = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
         return regTimeA - regTimeB;
@@ -502,21 +501,10 @@ export default {
       return this.players[this.match.ownerId]?.nickname || '待定';
     },
     confirmedPlayerIds() {
-      return (this.match.registrations || [])
-        .filter(r => {
-          // 状态检查：必须是已确认或已上传截图
-          if (r.status !== 'confirmed' && r.status !== 'screenshot_uploaded') return false;
-          // 临时球员过滤：兼容各种数据格式（truthy 的 isTempPlayer、有 tempNickname、playerId 以 temp_ 开头）
-          if (r.isTempPlayer) return false;
-          if (r.tempNickname) return false;
-          const pid = r.playerId;
-          if (!pid) return false;
-          if (typeof pid === 'string' && pid.startsWith('temp_')) return false;
-          // 兜底：如果 players 对象中标记为临时球员，也过滤
-          if (this.players[pid]?._isTempPlayer) return false;
-          return true;
-        })
-        .map(r => r.playerId);
+      // 评分权限以分队名单为准，排除临时球员
+      const teamAPlayers = (this.match.teamA?.players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_'));
+      const teamBPlayers = (this.match.teamB?.players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_'));
+      return [...new Set([...teamAPlayers, ...teamBPlayers])];
     },
     matchRatings() {
       const ratings = {};
@@ -805,15 +793,6 @@ export default {
       wx.hideLoading();
     },
 
-    async toggleRegistration() {
-      const newVal = !this.match.registrationClosed;
-      try {
-        await db.collection('matches').doc(this.matchId).update({ data: { registrationClosed: newVal } });
-        this.match.registrationClosed = newVal;
-        uni.showToast({ title: newVal ? '已关闭报名' : '已开启报名' });
-      } catch (e) { uni.showToast({ title: '操作失败', icon: 'none' }); }
-    },
-
     goEdit() {
       uni.navigateTo({ url: `/pages/match/edit?id=${this.matchId}` });
     },
@@ -887,9 +866,69 @@ export default {
     },
 
     async uploadScreenshot() {
+      let tempFilePath = '';
+      let fileSize = 0;
+      
       try {
-        const res = await uni.chooseImage({ count: 1, sourceType: ['album'] });
-        const tempFilePath = res.tempFilePaths[0];
+        // 优先使用 wx.chooseMedia，失败时回退到 wx.chooseImage
+        try {
+          const res = await new Promise((resolve, reject) => {
+            wx.chooseMedia({
+              count: 1,
+              mediaType: ['image'],
+              sourceType: ['album', 'camera'],
+              success: resolve,
+              fail: reject
+            });
+          });
+          if (!res.tempFiles || res.tempFiles.length === 0) {
+            uni.showToast({ title: '未选择图片', icon: 'none' });
+            return;
+          }
+          tempFilePath = res.tempFiles[0].tempFilePath;
+          fileSize = res.tempFiles[0].size || 0;
+        } catch (chooseErr) {
+          console.log('wx.chooseMedia 失败，回退到 wx.chooseImage:', chooseErr);
+          const errMsg = chooseErr.errMsg || '';
+          // 如果是 API 不支持或调用失败，回退到 chooseImage
+          if (errMsg.includes('not support') || errMsg.includes('fail') || !wx.chooseMedia) {
+            const res = await new Promise((resolve, reject) => {
+              wx.chooseImage({
+                count: 1,
+                sizeType: ['original', 'compressed'],
+                sourceType: ['album', 'camera'],
+                success: resolve,
+                fail: reject
+              });
+            });
+            if (!res.tempFilePaths || res.tempFilePaths.length === 0) {
+              uni.showToast({ title: '未选择图片', icon: 'none' });
+              return;
+            }
+            tempFilePath = res.tempFilePaths[0];
+            fileSize = res.tempFiles?.[0]?.size || 0;
+          } else {
+            throw chooseErr;
+          }
+        }
+        
+        // 如果图片大于 2MB，尝试压缩
+        if (fileSize > 2 * 1024 * 1024) {
+          uni.showLoading({ title: '压缩图片中...' });
+          try {
+            const compressRes = await new Promise((resolve, reject) => {
+              wx.compressImage({
+                src: tempFilePath,
+                quality: 70,
+                success: resolve,
+                fail: reject
+              });
+            });
+            tempFilePath = compressRes.tempFilePath;
+          } catch (compressErr) {
+            console.log('图片压缩失败，使用原图', compressErr);
+          }
+        }
         
         uni.showLoading({ title: '上传中' });
         try {
@@ -903,18 +942,30 @@ export default {
             data: { action: 'uploadScreenshot', matchId: this.matchId, playerId: this.currentPlayerId, screenshot: uploadRes.fileID }
           });
           
-          if (result.success) { uni.showToast({ title: '截图上传成功' }); this.loadMatch(); }
-          else { uni.showToast({ title: result.error || '上传失败', icon: 'none' }); }
+          if (result.success) { 
+            uni.showToast({ title: '截图上传成功' }); 
+            this.loadMatch(); 
+          }
+          else { 
+            uni.showToast({ title: result.error || '上传失败', icon: 'none', duration: 3000 }); 
+          }
         } catch (e) { 
           console.error('上传截图失败', e);
-          uni.showToast({ title: '上传失败', icon: 'none' }); 
+          const errMsg = e.message || e.errMsg || '未知错误';
+          if (errMsg.includes('exceed max size') || errMsg.includes('文件过大')) {
+            uni.showToast({ title: '图片过大，请压缩后再试', icon: 'none', duration: 3000 });
+          } else if (errMsg.includes('fail')) {
+            uni.showToast({ title: '上传失败: ' + errMsg, icon: 'none', duration: 3000 });
+          } else {
+            uni.showToast({ title: '上传失败，请重试', icon: 'none', duration: 3000 }); 
+          }
         }
         uni.hideLoading();
       } catch (e) {
-        console.log('选择图片取消', e);
+        // 用户取消选择或选择图片失败，不做处理
+        console.log('选择图片取消或失败', e);
       }
     },
-
     async confirmTeam() {
       uni.showModal({
         title: '确认名单', content: '确认后将按优先级排序，超出上限的变为候补。确定？',
