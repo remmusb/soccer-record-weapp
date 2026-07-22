@@ -55,24 +55,24 @@
     <!-- 综合评分 -->
     <view class="card rating-card">
       <view class="rating-big">
-        <view class="rating-number">{{player._liveRating?.compositeRating || 5}}</view>
+        <view class="rating-number">{{displayRating(player._liveRating?.compositeRating || 5).toFixed(1)}}</view>
         <view class="rating-label">综合评分</view>
       </view>
       <view class="rating-track">
-        <view class="rating-fill" :style="{width: ((player._liveRating?.compositeRating || 5) * 10) + '%'}"></view>
+        <view class="rating-fill" :style="{width: (displayRating(player._liveRating?.compositeRating || 5) * 10) + '%'}"></view>
       </view>
       <view class="rating-breakdown">
         <view class="breakdown-item">
           <view class="breakdown-dot" style="background:#3b82f6"></view>
-          <view class="breakdown-text">队友互评 {{(player._liveRating?.peerAvg || 5).toFixed(1)}} × 50%</view>
+          <view class="breakdown-text">队友互评 {{displayRating(player._liveRating?.peerAvg || 5).toFixed(1)}} × 50%</view>
         </view>
         <view class="breakdown-item">
           <view class="breakdown-dot" style="background:#f59e0b"></view>
-          <view class="breakdown-text">系统评分 {{(player._liveRating?.adminAvg || 5).toFixed(1)}} × 30%</view>
+          <view class="breakdown-text">系统评分 {{displayRating(player._liveRating?.adminAvg || 5).toFixed(1)}} × 30%</view>
         </view>
         <view class="breakdown-item">
           <view class="breakdown-dot" style="background:#10b981"></view>
-          <view class="breakdown-text">比赛表现 {{(player._liveRating?.performanceRating || 5).toFixed(1)}} × 20%</view>
+          <view class="breakdown-text">比赛表现 {{displayRating(player._liveRating?.performanceRating || 5).toFixed(1)}} × 20%</view>
         </view>
       </view>
     </view>
@@ -254,6 +254,12 @@ export default {
     },
   },
   methods: {
+    displayRating(rawScore) {
+      if (rawScore == null || isNaN(rawScore)) return 5;
+      const score = parseFloat(rawScore);
+      if (this.isAdmin) return score;
+      return score < 6 ? 6 : score;
+    },
     // 评分计算函数（与 list.vue / stats/index.vue 完全一致）
     calculatePlayerRating(player, completedMatches) {
       const playerId = player._id;

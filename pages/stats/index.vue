@@ -47,10 +47,15 @@ export default {
         owners: false,
         assistants: false,
         rated: false
-      }
+      },
+      isAdmin: false
     }
   },
-  onShow() {
+  async onShow() {
+    try {
+      const { result } = await wx.cloud.callFunction({ name: 'login' });
+      this.isAdmin = result.isAdmin || result.isSuperAdmin || false;
+    } catch (e) { this.isAdmin = false; }
     this.loadData();
   },
   computed: {
@@ -128,11 +133,17 @@ export default {
         { key: 'mvp', icon: '⭐', title: 'MVP榜', data: this.topMVP, score: p => p.stats?.mvp || 0 },
         { key: 'owners', icon: '👑', title: '场主榜', data: this.topOwners, score: p => p._liveOwnerCount || 0 },
         { key: 'assistants', icon: '🛡️', title: '护法榜', data: this.topAssistants, score: p => p._liveAssistantCount || 0 },
-        { key: 'rated', icon: '⭐', title: '评分榜', data: this.topRated, score: p => (p._compositeRating || 5).toFixed(1) },
+        { key: 'rated', icon: '⭐', title: '评分榜', data: this.topRated, score: p => this.displayRating(p._compositeRating || 5).toFixed(1) },
       ];
     }
   },
   methods: {
+    displayRating(rawScore) {
+      if (rawScore == null || isNaN(rawScore)) return 5;
+      const score = parseFloat(rawScore);
+      if (this.isAdmin) return score;
+      return score < 6 ? 6 : score;
+    },
     calculatePlayerRating(player, completedMatches) {
       const playerId = player._id;
       const FRONT_POSITIONS = ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];

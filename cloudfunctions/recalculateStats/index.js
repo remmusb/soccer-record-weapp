@@ -45,10 +45,6 @@ exports.main = async (event, context) => {
     }
     
     const completedMatches = allMatches.filter(m => m.status === 'completed');
-  try {
-    const { data: players } = await db.collection('players').get();
-    const { data: allMatches } = await db.collection('matches').get();
-    const completedMatches = allMatches.filter(m => m.status === 'completed');
     
     // 收集所有有效的 completed 比赛 matchId，用于过滤评分
     const validMatchIds = new Set(completedMatches.map(m => m._id));

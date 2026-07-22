@@ -275,6 +275,14 @@ export default {
     },
     getHistoricalRating(p) {
       // 统一显示综合评分（互评×50% + 管理员×30% + 表现×20%）
+      if (p._compositeRating !== undefined && !isNaN(p._compositeRating)) {
+        const raw = parseFloat(p._compositeRating);
+        if (this.isAdmin) return raw.toFixed(1);
+        return (raw < 6 ? 6 : raw).toFixed(1);
+      }
+      return '5.0';
+    },
+      // 统一显示综合评分（互评×50% + 管理员×30% + 表现×20%）
       if (p._compositeRating !== undefined && !isNaN(p._compositeRating)) return p._compositeRating.toFixed(1);
       return '5.0';
     },

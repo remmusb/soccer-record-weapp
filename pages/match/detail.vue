@@ -70,11 +70,14 @@
           </view>
           <view class="lineup-list">
             <view class="lineup-item" v-for="pid in (lineupTab === 'A' ? teamAPlayersFiltered : teamBPlayersFiltered)" :key="pid">
-              <view class="lineup-player">{{players[pid]?.nickname || '?'}}</view>
+              <view class="lineup-player">
+                {{players[pid]?.nickname || '?'}}
+                <text v-if="isMVP(pid)" class="mvp-tag">🏆</text>
+              </view>
               <view class="lineup-stats">
                 <text v-if="getPlayerGoals(pid) > 0" class="stat-goal">⚽{{getPlayerGoals(pid)}}</text>
                 <text v-if="getPlayerAssists(pid) > 0" class="stat-assist">🎯{{getPlayerAssists(pid)}}</text>
-                <text v-if="match.status === 'completed'" class="stat-rating">{{getPlayerMatchRating(pid)?.toFixed(1) || '-'}}</text>
+                <text v-if="match.status === 'completed'" class="stat-rating">{{displayRating(getPlayerMatchRating(pid))}}</text>
               </view>
             </view>
           </view>
@@ -310,7 +313,7 @@
             </view>
             <view class="rating-right">
               <text v-if="isMVP(pid)" class="mvp-badge">🏆MVP</text>
-              <text class="rating-score">{{(matchRatings[pid] || 5).toFixed(1)}}</text>
+              <text class="rating-score">{{displayRating(matchRatings[pid])}}</text>
             </view>
           </view>
         </view>
@@ -1274,6 +1277,20 @@ export default {
       if (all.length === 0) return null;
       return all.reduce((s, r) => s + r.score, 0) / all.length;
     },
+    displayRating(rawScore) {
+      if (rawScore == null || isNaN(rawScore)) return '5.0';
+      const score = parseFloat(rawScore);
+      if (this.isAdmin || this.isSuperAdmin) return score.toFixed(1);
+      return (score < 6 ? 6 : score).toFixed(1);
+    },
+      const p = this.players[pid];
+      if (!p || !p.ratings) return null;
+      const peer = (p.ratings.peerRatings || []).filter(r => r.matchId === this.matchId);
+      const admin = (p.ratings.adminRatings || []).filter(r => r.matchId === this.matchId);
+      const all = [...peer, ...admin];
+      if (all.length === 0) return null;
+      return all.reduce((s, r) => s + r.score, 0) / all.length;
+    },
     getPlayerYellows(pid) {
       return (this.match.events || []).filter(e => e.type === 'yellow' && e.playerId === pid).length;
     },
@@ -1478,6 +1495,7 @@ export default {
 .stat-goal { font-size: 24rpx; color: #dc2626; font-weight: 700; }
 .stat-assist { font-size: 24rpx; color: #2563eb; font-weight: 700; }
 .stat-rating { font-size: 24rpx; color: #f59e0b; font-weight: 700; background: #fef3c7; padding: 4rpx 12rpx; border-radius: 8rpx; }
+.mvp-tag { font-size: 24rpx; margin-left: 8rpx; }
 
 /* 评分列表统计标注 */
 .rating-left { display: flex; flex-direction: column; gap: 4rpx; }

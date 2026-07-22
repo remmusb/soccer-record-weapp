@@ -2,8 +2,29 @@
   <view class="container">
     <view class="card">
       <view class="action-bar">
-        <view class="btn-primary" @click="autoBalance">⚡ 自动均衡</view>
+        <view class="btn-primary" @click="autoBalance">⚡ 自动分队</view>
+        <view class="btn-primary" style="background: linear-gradient(135deg, #f59e0b, #d97706);" @click="startCaptainPick">🏆 队长选人</view>
         <view class="btn-secondary" @click="clearTeams">🔄 清空</view>
+      </view>
+
+      <!-- 队长选人模式提示 -->
+      <view v-if="captainPickMode" class="captain-pick-status">
+        <view v-if="!captainA || !captainB" class="captain-hint">
+          <text class="hint-icon">👑</text>
+          <text class="hint-text">请先设置两队队长（从未分配球员中选择）</text>
+        </view>
+        <view v-else class="captain-hint">
+          <text class="hint-icon">🎯</text>
+          <text class="hint-text">轮到 {{currentPicker === 'A' ? 'A队' : 'B队'}} 队长选人</text>
+        </view>
+        <view class="captain-tags" v-if="captainA || captainB">
+          <view class="captain-tag captain-a" v-if="captainA">
+            <text>A队队长：{{players[captainA]?.nickname}}</text>
+          </view>
+          <view class="captain-tag captain-b" v-if="captainB">
+            <text>B队队长：{{players[captainB]?.nickname}}</text>
+          </view>
+        </view>
       </view>
 
       <view class="teams">
@@ -93,9 +114,17 @@
         <view class="unassigned-list">
           <view class="unassigned-item" v-for="p in unassigned" :key="p._id">
             <text>{{p.nickname}}</text>
-            <view class="assign-btns">
+            <view class="assign-btns" v-if="!captainPickMode">
               <text class="assign-a" @click="assign(p._id, 'A')">A</text>
               <text class="assign-b" @click="assign(p._id, 'B')">B</text>
+            </view>
+            <view class="captain-btns" v-else-if="(!captainA || !captainB) && p._id !== captainA && p._id !== captainB">
+              <text v-if="!captainA" class="set-captain-a" @click="setCaptainA(p._id)">设为A队长</text>
+              <text v-if="!captainB" class="set-captain-b" @click="setCaptainB(p._id)">设为B队长</text>
+            </view>
+            <view class="captain-btns" v-else-if="captainA && captainB && p._id !== captainA && p._id !== captainB">
+              <text v-if="currentPicker === 'A'" class="pick-btn pick-a" @click="captainPickPlayer(p._id, 'A')">加入A队</text>
+              <text v-else class="pick-btn pick-b" @click="captainPickPlayer(p._id, 'B')">加入B队</text>
             </view>
           </view>
         </view>
@@ -124,6 +153,10 @@ export default {
       match: { teamA: { players: [], score: 0 }, teamB: { players: [], score: 0 }, registrations: [] },
       players: {},
       isAdmin: false,
+      captainPickMode: false,
+      captainA: '',
+      captainB: '',
+      currentPicker: 'A',
     }
   },
   onLoad(options) {
@@ -272,6 +305,10 @@ export default {
     
     
     async autoBalance() {
+      this.captainPickMode = false;
+      this.captainA = '';
+      this.captainB = '';
+      this.currentPicker = 'A';
       const players = this.allRegistered;
       if (players.length < 2) {
         uni.showToast({ title: '人数不足', icon: 'none' });
@@ -327,6 +364,42 @@ export default {
       uni.showToast({ title: '已自动均衡，请保存', icon: 'none' });
     },
     
+    startCaptainPick() {
+      this.clearTeams();
+      this.captainPickMode = true;
+      this.captainA = '';
+      this.captainB = '';
+      this.currentPicker = 'A';
+      uni.showToast({ title: '请先设置两队队长', icon: 'none' });
+    },
+    setCaptainA(playerId) {
+      this.captainA = playerId;
+      this.match.teamA.players = [playerId];
+      this.match.teamA.captainId = playerId;
+      if (this.captainB) {
+        this.currentPicker = 'B';
+        uni.showToast({ title: 'B队队长先选', icon: 'none' });
+      }
+    },
+    setCaptainB(playerId) {
+      this.captainB = playerId;
+      this.match.teamB.players = [playerId];
+      this.match.teamB.captainId = playerId;
+      if (this.captainA) {
+        this.currentPicker = 'A';
+        uni.showToast({ title: 'A队队长先选', icon: 'none' });
+      }
+    },
+    captainPickPlayer(playerId, team) {
+      if (team === 'A') {
+        this.match.teamA.players.push(playerId);
+        this.currentPicker = 'B';
+      } else {
+        this.match.teamB.players.push(playerId);
+        this.currentPicker = 'A';
+      }
+    },
+    
     getFormation(team) {
       const rows = [];
       const gks = team.filter(p => this.getPositionCategory(p) === 'GK');
@@ -352,6 +425,10 @@ export default {
     clearTeams() {
       this.match.teamA = { ...this.match.teamA, players: [], captainId: '', captainIdx: -1 };
       this.match.teamB = { ...this.match.teamB, players: [], captainId: '', captainIdx: -1 };
+      this.captainPickMode = false;
+      this.captainA = '';
+      this.captainB = '';
+      this.currentPicker = 'A';
     },
     moveToB(id) {
       this.match.teamA.players = this.match.teamA.players.filter(pid => pid !== id);
@@ -534,5 +611,80 @@ export default {
   white-space: nowrap;
   font-weight: 500;
   text-shadow: 0 1rpx 2rpx rgba(0,0,0,0.3);
+}
+
+/* 队长选人模式 */
+.captain-pick-status {
+  background: linear-gradient(135deg, #fef3c7, #fef9c8);
+  border-radius: 16rpx;
+  padding: 20rpx;
+  margin-bottom: 20rpx;
+}
+.captain-hint {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+.hint-icon {
+  font-size: 32rpx;
+}
+.hint-text {
+  font-size: 28rpx;
+  color: #92400e;
+  font-weight: 700;
+}
+.captain-tags {
+  display: flex;
+  gap: 12rpx;
+  flex-wrap: wrap;
+}
+.captain-tag {
+  padding: 8rpx 16rpx;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+.captain-a {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.captain-b {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.captain-btns {
+  display: flex;
+  gap: 8rpx;
+}
+.set-captain-a {
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: 22rpx;
+  font-weight: 700;
+  padding: 6rpx 12rpx;
+  border-radius: 8rpx;
+}
+.set-captain-b {
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 22rpx;
+  font-weight: 700;
+  padding: 6rpx 12rpx;
+  border-radius: 8rpx;
+}
+.pick-btn {
+  font-size: 22rpx;
+  font-weight: 700;
+  padding: 6rpx 12rpx;
+  border-radius: 8rpx;
+}
+.pick-a {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.pick-b {
+  background: #fee2e2;
+  color: #991b1b;
 }
 </style>
