@@ -77,7 +77,7 @@
               <view class="lineup-stats">
                 <text v-if="getPlayerGoals(pid) > 0" class="stat-goal">⚽{{getPlayerGoals(pid)}}</text>
                 <text v-if="getPlayerAssists(pid) > 0" class="stat-assist">🎯{{getPlayerAssists(pid)}}</text>
-                <text v-if="match.status === 'completed'" class="stat-rating">{{displayRating(getPlayerMatchRating(pid))}}</text>
+                <text v-if="match.status === 'completed'" class="stat-rating">{{displayRating(getPlayerMatchRating(pid)).toFixed(1)}}</text>
               </view>
             </view>
           </view>
@@ -298,7 +298,10 @@
       </view>
       <!-- 评分 -->
       <view class="card" v-if="match.status === 'completed' && match.ratingOpen">
-        <view class="section-title">⭐ 评分</view>
+        <view class="section-header">
+          <view class="section-title">⭐ 评分</view>
+          <text v-if="isAdmin" class="admin-raw-btn" @click="showMatchRawRatings">👁️ 查看原始评分</text>
+        </view>
         <view class="rating-list">
           <view class="rating-item" v-for="(pid, idx) in confirmedPlayerIds" :key="pid">
             <view class="rating-left">
@@ -313,13 +316,30 @@
             </view>
             <view class="rating-right">
               <text v-if="isMVP(pid)" class="mvp-badge">🏆MVP</text>
-              <text class="rating-score">{{displayRating(matchRatings[pid])}}</text>
+              <text class="rating-score">{{displayRating(matchRatings[pid]).toFixed(1)}}</text>
             </view>
           </view>
         </view>
         <view class="btn-primary" style="margin-top:20rpx" @click="goRate">📝 去评分</view>
       </view>
       
+      <!-- 原始评分弹窗（管理员专用）-->
+      <view class="modal-overlay" v-if="showRawRatingsModal" @click="showRawRatingsModal = false">
+        <view class="modal-popup" @click.stop>
+          <view class="modal-header">
+            <text class="modal-title">🔍 本场原始评分</text>
+            <text class="modal-close" @click="showRawRatingsModal = false">✕</text>
+          </view>
+          <scroll-view scroll-y class="modal-body">
+            <view class="raw-rating-row" v-for="pid in confirmedPlayerIds" :key="pid">
+              <text class="raw-name">{{players[pid]?.nickname}}</text>
+              <text class="raw-score">原始: {{(matchRatings[pid] || 5).toFixed(1)}}</text>
+              <text class="raw-display">显示: {{displayRating(matchRatings[pid]).toFixed(1)}}</text>
+            </view>
+          </scroll-view>
+        </view>
+      </view>
+
       <!-- MVP -->
       <view class="card" v-if="match.mvp && match.mvp.length > 0">
         <view class="section-title">🏆 MVP</view>
@@ -411,6 +431,7 @@ export default {
       collapsedSections: { owner: false, registration: false },
       showPeerRatings: false,
       allPeerRatings: [],
+      showRawRatingsModal: false,
       // 手动排序模式
       isSortingMode: false,
       sortableRegistrations: [],
@@ -1278,18 +1299,10 @@ export default {
       return all.reduce((s, r) => s + r.score, 0) / all.length;
     },
     displayRating(rawScore) {
-      if (rawScore == null || isNaN(rawScore)) return '5.0';
+      if (rawScore == null || isNaN(rawScore)) return 5;
       const score = parseFloat(rawScore);
-      if (this.isAdmin || this.isSuperAdmin) return score.toFixed(1);
-      return (score < 6 ? 6 : score).toFixed(1);
-    },
-      const p = this.players[pid];
-      if (!p || !p.ratings) return null;
-      const peer = (p.ratings.peerRatings || []).filter(r => r.matchId === this.matchId);
-      const admin = (p.ratings.adminRatings || []).filter(r => r.matchId === this.matchId);
-      const all = [...peer, ...admin];
-      if (all.length === 0) return null;
-      return all.reduce((s, r) => s + r.score, 0) / all.length;
+      if (this.isAdmin || this.isSuperAdmin) return score;
+      return score < 6 ? 6 : score;
     },
     getPlayerYellows(pid) {
       return (this.match.events || []).filter(e => e.type === 'yellow' && e.playerId === pid).length;
@@ -1299,6 +1312,9 @@ export default {
     },
     getPlayerOwnGoals(pid) {
       return (this.match.events || []).filter(e => (e.type === 'ownGoal' || e.type === 'own_goal') && e.playerId === pid).length;
+    },
+    showMatchRawRatings() {
+      this.showRawRatingsModal = true;
     },
     isMVP(pid) {
       return (this.match.mvp || []).includes(pid);
@@ -1526,4 +1542,19 @@ export default {
 /* 手动排序 */
 .sort-handle { font-size: 28rpx; padding: 4rpx 8rpx; cursor: pointer; }
 .sort-handle:active { opacity: 0.5; }
+
+/* 管理员查看原始评分 */
+.admin-raw-btn { font-size: 24rpx; color: #0369a1; font-weight: 600; padding: 8rpx 16rpx; background: #f0f9ff; border-radius: 8rpx; }
+
+/* 原始评分弹窗 */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-popup { background: #fff; border-radius: 20rpx; width: 80%; max-height: 60vh; display: flex; flex-direction: column; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 24rpx 28rpx; border-bottom: 2rpx solid #f1f5f9; }
+.modal-title { font-size: 32rpx; font-weight: 700; color: #1e293b; }
+.modal-close { font-size: 36rpx; color: #94a3b8; padding: 8rpx; }
+.modal-body { max-height: 50vh; padding: 12rpx 0; }
+.raw-rating-row { display: flex; align-items: center; justify-content: space-between; padding: 16rpx 28rpx; border-bottom: 2rpx solid #f8fafc; }
+.raw-name { font-size: 28rpx; color: #1e293b; font-weight: 600; }
+.raw-score { font-size: 24rpx; color: #6b7280; }
+.raw-display { font-size: 24rpx; color: #f59e0b; font-weight: 700; }
 </style>

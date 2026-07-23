@@ -177,11 +177,12 @@ export default {
         ))];
         const playerIds = [...new Set([...ownerIds, ...assistantIds, ...eventPlayerIds])];
         if (playerIds.length > 0) {
-          const { data: players } = await db.collection('players')
-            .where({ _id: db.command.in(playerIds) })
-            .get();
-          players.forEach(p => {
-            this.players[p._id] = p.nickname;
+          const { result } = await wx.cloud.callFunction({ name: 'getPlayers' });
+          const allPlayers = result.players || [];
+          allPlayers.forEach(p => {
+            if (playerIds.includes(p._id)) {
+              this.players[p._id] = p.nickname;
+            }
           });
         }
       } catch (e) {
@@ -190,7 +191,7 @@ export default {
       wx.hideLoading();
     },
     getPlayerName(id) {
-      return this.players[id] || '';
+      return this.players[id] || '? ';
     },
     formatAssistants(m) {
       const ids = m.assistantIds || [];

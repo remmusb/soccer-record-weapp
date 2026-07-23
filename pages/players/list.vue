@@ -282,10 +282,6 @@ export default {
       }
       return '5.0';
     },
-      // 统一显示综合评分（互评×50% + 管理员×30% + 表现×20%）
-      if (p._compositeRating !== undefined && !isNaN(p._compositeRating)) return p._compositeRating.toFixed(1);
-      return '5.0';
-    },
     goCreate() { uni.navigateTo({ url: '/pages/players/create' }) },
     goDetail(id) { uni.navigateTo({ url: `/pages/players/detail?id=${id}` }) },
     deletePlayer(playerId) {

@@ -34,6 +34,8 @@
           <text class="event-player">{{getPlayerName(e.playerId)}}</text>
           <text class="event-type-name">{{eventTypeName(e.type)}}</text>
           <text v-if="e.assistById" class="event-assist">(助攻: {{getPlayerName(e.assistById)}})</text>
+          <text v-if="e.isPenalty" class="event-penalty">⭕点球</text>
+          <text v-if="e.isOwnGoal" class="event-own">💥乌龙</text>
           <text v-if="e.minute" class="event-min">{{e.minute}}'</text>
           <text class="delete-btn" @click="removeEvent(findEventIndex(e))">✕</text>
         </view>
@@ -49,6 +51,8 @@
           <text class="event-player">{{getPlayerName(e.playerId)}}</text>
           <text class="event-type-name">{{eventTypeName(e.type)}}</text>
           <text v-if="e.assistById" class="event-assist">(助攻: {{getPlayerName(e.assistById)}})</text>
+          <text v-if="e.isPenalty" class="event-penalty">⭕点球</text>
+          <text v-if="e.isOwnGoal" class="event-own">💥乌龙</text>
           <text v-if="e.minute" class="event-min">{{e.minute}}'</text>
           <text class="delete-btn" @click="removeEvent(findEventIndex(e))">✕</text>
         </view>
@@ -82,6 +86,18 @@
             <text>▼</text>
           </view>
         </view>
+        <view class="form-group" v-if="selectedType === 'goal'">
+          <view class="checkbox-row">
+            <view class="checkbox-item" :class="{'checked': isPenalty}" @click="isPenalty = !isPenalty">
+              <text class="checkbox-box">{{isPenalty ? '☑️' : '⬜️'}}</text>
+              <text class="checkbox-label">点球</text>
+            </view>
+            <view class="checkbox-item" :class="{'checked': isOwnGoal}" @click="isOwnGoal = !isOwnGoal">
+              <text class="checkbox-box">{{isOwnGoal ? '☑️' : '⬜️'}}</text>
+              <text class="checkbox-label">乌龙球</text>
+            </view>
+          </view>
+        </view>
         <view class="form-group">
           <text class="form-label">时间（分钟）</text>
           <input class="form-input" v-model="eventMinute" type="number" placeholder="如 25" />
@@ -108,21 +124,6 @@
             <text v-if="isInTeamA(p._id)" class="picker-team-label">{{teamAName}}</text>
             <text v-else-if="isInTeamB(p._id)" class="picker-team-label">{{teamBName}}</text>
             <text v-else class="picker-team-label picker-team-none">未分队</text>
-          </view>
-        </scroll-view>
-      </view>
-    </view>
-    <view class="picker-overlay" v-if="showPlayerPicker" @click="showPlayerPicker = false">
-      <view class="picker-popup" @click.stop>
-        <view class="picker-header">
-          <text class="picker-title">选择球员</text>
-          <text class="picker-close" @click="showPlayerPicker = false">✕</text>
-        </view>
-        <scroll-view scroll-y class="picker-body">
-          <view class="picker-item" v-for="p in allPlayers" :key="p._id" @click="selectPlayer(p)">
-            <text class="picker-name">{{p.nickname}}</text>
-            <text v-if="isInTeamA(p._id)" class="picker-team-tag team-a-tag">{{teamAName || 'A队'}}</text>
-            <text v-else-if="isInTeamB(p._id)" class="picker-team-tag team-b-tag">{{teamBName || 'B队'}}</text>
           </view>
         </scroll-view>
       </view>
@@ -155,8 +156,6 @@ const EVENT_TYPES = [
   { id: 'goal', name: '进球', icon: '⚽' },
   { id: 'yellow', name: '黄牌', icon: '🟨' },
   { id: 'red', name: '红牌', icon: '🟥' },
-  { id: 'own_goal', name: '乌龙', icon: '💥' },
-  { id: 'penalty', name: '点球', icon: '⭕' },
   { id: 'sub_in', name: '替补上场', icon: '▶️' },
   { id: 'sub_out', name: '替补下场', icon: '⏹️' },
 ];
@@ -172,6 +171,8 @@ export default {
       selectedType: 'goal',
       selectedAssist: null,
       eventMinute: '',
+      isPenalty: false,
+      isOwnGoal: false,
       EVENT_TYPES,
       showPlayerPicker: false,
       showAssistPicker: false,
@@ -364,9 +365,17 @@ export default {
         minute,
       };
       
-      // 如果是进球且选择了助攻者，将助攻者记录到进球事件的 assistById
-      if (this.selectedType === 'goal' && this.selectedAssist) {
-        event.assistById = this.selectedAssist._id;
+      // 如果是进球，记录助攻者、点球和乌龙球标记
+      if (this.selectedType === 'goal') {
+        if (this.selectedAssist) {
+          event.assistById = this.selectedAssist._id;
+        }
+        if (this.isPenalty) {
+          event.isPenalty = true;
+        }
+        if (this.isOwnGoal) {
+          event.isOwnGoal = true;
+        }
       }
       
       events.push(event);
@@ -375,6 +384,8 @@ export default {
       this.selectedPlayer = null;
       this.selectedAssist = null;
       this.eventMinute = '';
+      this.isPenalty = false;
+      this.isOwnGoal = false;
       uni.showToast({ title: '已添加' });
     },
     removeEvent(idx) {
@@ -448,4 +459,11 @@ export default {
 .picker-dot { width: 20rpx; height: 20rpx; border-radius: 50%; flex-shrink: 0; border: 2rpx solid rgba(0,0,0,0.1); }
 .picker-team-label { font-size: 22rpx; padding: 4rpx 10rpx; border-radius: 8rpx; font-weight: 600; background: #f3f4f6; color: #6b7280; }
 .picker-team-none { background: #f3f4f6; color: #9ca3af; }
+.checkbox-row { display: flex; gap: 32rpx; }
+.checkbox-item { display: flex; align-items: center; gap: 8rpx; padding: 12rpx 16rpx; border-radius: 8rpx; background: #f3f4f6; }
+.checkbox-item.checked { background: #dcfce7; border: 2rpx solid #16a34a; }
+.checkbox-box { font-size: 28rpx; }
+.checkbox-label { font-size: 26rpx; color: #374151; }
+.event-penalty { font-size: 22rpx; color: #dc2626; font-weight: 700; background: #fee2e2; padding: 2rpx 8rpx; border-radius: 6rpx; }
+.event-own { font-size: 22rpx; color: #7c3aed; font-weight: 700; background: #ede9fe; padding: 2rpx 8rpx; border-radius: 6rpx; }
 </style>

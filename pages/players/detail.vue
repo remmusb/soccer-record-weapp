@@ -75,6 +75,41 @@
           <view class="breakdown-text">比赛表现 {{displayRating(player._liveRating?.performanceRating || 5).toFixed(1)}} × 20%</view>
         </view>
       </view>
+      <view v-if="isAdmin && player._liveRating" class="admin-raw-rating-btn" @click="showRawRatingModal">
+        👁️ 查看原始评分
+      </view>
+    </view>
+
+    <!-- 原始评分弹窗（管理员专用）-->
+    <view class="modal-overlay" v-if="showRawRating" @click="showRawRating = false">
+      <view class="modal-popup" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">🔍 原始评分</text>
+          <text class="modal-close" @click="showRawRating = false">✕</text>
+        </view>
+        <view class="modal-body" v-if="rawRatingData">
+          <view class="raw-rating-row">
+            <text class="raw-label">队友互评</text>
+            <text class="raw-value">{{rawRatingData.peerAvg?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row">
+            <text class="raw-label">系统评分</text>
+            <text class="raw-value">{{rawRatingData.adminAvg?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row">
+            <text class="raw-label">比赛表现</text>
+            <text class="raw-value">{{rawRatingData.performanceRating?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row total">
+            <text class="raw-label">综合评分（原始）</text>
+            <text class="raw-value">{{rawRatingData.compositeRating?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row total">
+            <text class="raw-label">综合评分（显示）</text>
+            <text class="raw-value">{{displayRating(rawRatingData.compositeRating).toFixed(1)}}</text>
+          </view>
+        </view>
+      </view>
     </view>
 
     <!-- 管理员操作 -->
@@ -111,7 +146,7 @@
     </view>
 
     <!-- 评分历史 -->
-    <view class="card" v-if="filteredRatingHistory.length > 0">
+    <view class=
       <view class="section-title">📈 评分历史</view>
       <view class="rating-history">
         <view class="history-row history-header">
@@ -155,7 +190,11 @@
       <view class="history-item" v-for="m in filteredMatches" :key="m._id">
         <view class="history-title">{{m.title}}</view>
         <view class="history-meta">{{m.date}} {{m.time}} · {{m.location || '待定'}}</view>
-        <view class="history-result" :class="getResultClass(m)">{{getResult(m)}}</view>
+        <view class="history-badges">
+          <text v-if="getMatchGoals(m) > 0" class="badge-goal">⚽{{getMatchGoals(m)}}</text>
+          <text v-if="getMatchRating(m)" class="badge-rating">⭐{{displayRating(getMatchRating(m)).toFixed(1)}}</text>
+          <view class="history-result" :class="getResultClass(m)">{{getResult(m)}}</view>
+        </view>
       </view>
     </view>
   </view>
@@ -183,6 +222,9 @@ export default {
       timeFilter: 'all',
       allMatchesData: [],
       isAdmin: false,
+      isSuperAdmin: false,
+      showRawRating: false,
+      rawRatingData: null,
     }
   },
   onLoad(options) {
@@ -257,7 +299,7 @@ export default {
     displayRating(rawScore) {
       if (rawScore == null || isNaN(rawScore)) return 5;
       const score = parseFloat(rawScore);
-      if (this.isAdmin) return score;
+      if (this.isAdmin || this.isSuperAdmin) return score;
       return score < 6 ? 6 : score;
     },
     // 评分计算函数（与 list.vue / stats/index.vue 完全一致）
@@ -369,6 +411,7 @@ export default {
         // 检查管理员身份
         const { result: loginRes } = await wx.cloud.callFunction({ name: 'login' });
         this.isAdmin = loginRes.isAdmin || false;
+        this.isSuperAdmin = loginRes.isSuperAdmin || false;
 
         const { data } = await db.collection('players').doc(this.playerId).get();
         this.player = data;
@@ -473,6 +516,20 @@ export default {
       }
       wx.hideLoading();
     },
+    getMatchRating(m) {
+      const ratings = this.player?.ratings;
+      if (!ratings) return null;
+      const peer = (ratings.peerRatings || []).find(r => r.matchId === m._id);
+      const admin = (ratings.adminRatings || []).find(r => r.matchId === m._id);
+      const all = [];
+      if (peer) all.push(peer.score);
+      if (admin) all.push(admin.score);
+      if (all.length === 0) return null;
+      return all.reduce((s, r) => s + r, 0) / all.length;
+    },
+    getMatchGoals(m) {
+      return (m.events || []).filter(e => e.type === 'goal' && e.playerId === this.playerId).length;
+    },
     getPositions(p) {
       if (!p?.positions) return '';
       return p.positions.map(pos => POSITIONS.find(pt => pt.id === pos)?.name || pos).join(' · ');
@@ -491,6 +548,10 @@ export default {
     },
 
     // ===== 管理员操作 =====
+    showRawRatingModal() {
+      this.rawRatingData = this.player._liveRating;
+      this.showRawRating = true;
+    },
     editPlayerInfo() {
       uni.navigateTo({ url: `/pages/players/create?playerId=${this.playerId}` });
     },
@@ -612,4 +673,24 @@ export default {
 .status-tag.pending_screenshot { background: #ffedd5; color: #9a3412; }
 .status-tag.confirmed { background: #dcfce7; color: #166534; }
 .team-color { font-size: 22rpx; color: #2563eb; margin-top: 4rpx; }
+
+/* 参赛历史徽章 */
+.history-badges { display: flex; align-items: center; gap: 12rpx; margin-top: 8rpx; flex-wrap: wrap; }
+.badge-goal { font-size: 22rpx; color: #dc2626; font-weight: 700; background: #fee2e2; padding: 2rpx 10rpx; border-radius: 8rpx; }
+.badge-rating { font-size: 22rpx; color: #f59e0b; font-weight: 700; background: #fef3c7; padding: 2rpx 10rpx; border-radius: 8rpx; }
+
+/* 管理员查看原始评分按钮 */
+.admin-raw-rating-btn { text-align: center; padding: 16rpx 0; margin-top: 16rpx; background: #f0f9ff; color: #0369a1; border-radius: 12rpx; font-size: 26rpx; font-weight: 600; }
+
+/* 原始评分弹窗 */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-popup { background: #fff; border-radius: 20rpx; width: 80%; max-height: 60vh; display: flex; flex-direction: column; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 24rpx 28rpx; border-bottom: 2rpx solid #f1f5f9; }
+.modal-title { font-size: 32rpx; font-weight: 700; color: #1e293b; }
+.modal-close { font-size: 36rpx; color: #94a3b8; padding: 8rpx; }
+.modal-body { padding: 24rpx 28rpx; }
+.raw-rating-row { display: flex; justify-content: space-between; padding: 16rpx 0; border-bottom: 2rpx solid #f3f4f6; }
+.raw-rating-row.total { border-bottom: none; font-weight: 700; }
+.raw-label { font-size: 28rpx; color: #4b5563; }
+.raw-value { font-size: 28rpx; color: #1e293b; font-weight: 700; }
 </style>
