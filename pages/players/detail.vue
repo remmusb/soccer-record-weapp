@@ -75,7 +75,7 @@
           <view class="breakdown-text">比赛表现 {{displayRating(player._liveRating?.performanceRating || 5).toFixed(1)}} × 20%</view>
         </view>
       </view>
-      <view v-if="isAdmin && player._liveRating" class="admin-raw-rating-btn" @click="showRawRatingModal">
+      <view v-if="(isAdmin || isSuperAdmin) && player._liveRating" class="admin-raw-rating-btn" @click="showRawRatingModal">
         👁️ 查看原始评分
       </view>
     </view>
@@ -112,8 +112,50 @@
       </view>
     </view>
 
+    <!-- 单场原始评分弹窗（管理员专用）-->
+    <view class="modal-overlay" v-if="showMatchRawRating" @click="showMatchRawRating = false">
+      <view class="modal-popup" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">🔍 本场原始评分</text>
+          <text class="modal-close" @click="showMatchRawRating = false">✕</text>
+        </view>
+        <view class="modal-body" v-if="matchRawRatingData">
+          <view class="raw-rating-row">
+            <text class="raw-label">场次</text>
+            <text class="raw-value">{{matchRawRatingData.matchTitle}}</text>
+          </view>
+          <view class="raw-rating-row">
+            <text class="raw-label">原始评分</text>
+            <text class="raw-value">{{matchRawRatingData.rawScore?.toFixed(1)}}</text>
+          </view>
+          <view class="raw-rating-row">
+            <text class="raw-label">显示评分</text>
+            <text class="raw-value">{{displayRating(matchRawRatingData.rawScore).toFixed(1)}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 所有场次原始评分弹窗（管理员专用）-->
+    <view class="modal-overlay" v-if="showAllMatchRawRatingsModal" @click="showAllMatchRawRatingsModal = false">
+      <view class="modal-popup" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">🔍 参赛历史原始评分</text>
+          <text class="modal-close" @click="showAllMatchRawRatingsModal = false">✕</text>
+        </view>
+        <scroll-view scroll-y class="modal-body">
+          <view v-if="allMatchRawRatingsData.length === 0" class="empty" style="padding:40rpx 0">暂无评分记录</view>
+          <view v-for="item in allMatchRawRatingsData" :key="item.matchTitle" class="raw-rating-row">
+            <text class="raw-label">{{item.matchTitle}}</text>
+            <text class="raw-score">原始: {{item.rawScore?.toFixed(1)}}</text>
+            <text class="raw-display">显示: {{item.displayScore?.toFixed(1)}}</text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
+
     <!-- 管理员操作 -->
-    <view class="card" v-if="isAdmin">
+    <view class="card" v-if="isAdmin || isSuperAdmin">
       <view class="section-title">👔 管理员操作</view>
       <view class="admin-action-row">
         <view class="admin-action-btn" @click="editPlayerInfo">📝 编辑球员资料</view>
@@ -145,8 +187,8 @@
       </view>
     </view>
 
-    <!-- 评分历史 -->
-    <view class=
+    <!-- 评分历史（仅管理员可见） -->
+    <view class="card" v-if="(isAdmin || isSuperAdmin) && filteredRatingHistory.length > 0">
       <view class="section-title">📈 评分历史</view>
       <view class="rating-history">
         <view class="history-row history-header">
@@ -185,16 +227,20 @@
 
     <!-- 参赛历史 -->
     <view class="card">
-      <view class="section-title">📅 参赛历史</view>
+      <view class="section-header">
+        <view class="section-title">📅 参赛历史</view>
+        <text v-if="(isAdmin || isSuperAdmin) && filteredMatches.length > 0" class="admin-raw-btn" @click="showAllMatchRawRatings">👁️ 查看原始评分</text>
+      </view>
       <view class="empty" v-if="filteredMatches.length === 0">暂无{{filterLabel}}参赛记录</view>
       <view class="history-item" v-for="m in filteredMatches" :key="m._id">
-        <view class="history-title">{{m.title}}</view>
-        <view class="history-meta">{{m.date}} {{m.time}} · {{m.location || '待定'}}</view>
-        <view class="history-badges">
-          <text v-if="getMatchGoals(m) > 0" class="badge-goal">⚽{{getMatchGoals(m)}}</text>
-          <text v-if="getMatchRating(m)" class="badge-rating">⭐{{displayRating(getMatchRating(m)).toFixed(1)}}</text>
-          <view class="history-result" :class="getResultClass(m)">{{getResult(m)}}</view>
+        <view>
+          <view class="history-title">{{m.title}}</view>
+          <view class="history-meta">{{m.date}} {{m.time}} · {{m.location || '待定'}}</view>
+          <view class="history-badges">
+            <text v-if="getMatchRating(m)" class="badge-rating" :class="{'admin-clickable': isAdmin || isSuperAdmin}" @click.stop="(isAdmin || isSuperAdmin) && showMatchRawRatingFn(m)">⭐{{displayRating(getMatchRating(m)).toFixed(1)}}</text>
+          </view>
         </view>
+        <view class="history-result" :class="getResultClass(m)">{{getResult(m)}}</view>
       </view>
     </view>
   </view>
@@ -225,6 +271,10 @@ export default {
       isSuperAdmin: false,
       showRawRating: false,
       rawRatingData: null,
+      showMatchRawRating: false,
+      matchRawRatingData: null,
+      showAllMatchRawRatingsModal: false,
+      allMatchRawRatingsData: [],
     }
   },
   onLoad(options) {
@@ -262,20 +312,12 @@ export default {
           if (bWin) wins++; else if (draw) draws++; else losses++;
         }
         for (const e of (m.events || [])) {
-          if (e.playerId === this.playerId) {
-            if (e.type === 'goal') goals++;
-            if (e.type === 'yellow') yellowCards++;
-            if (e.type === 'red') redCards++;
-            if (e.type === 'own_goal') ownGoals++;
-          }
-          // 统计进球事件中的助攻者（assistById）
-          if (e.type === 'goal' && e.assistById === this.playerId) {
-            assists++;
-          }
-          // 兼容旧格式：独立的 assist 事件
-          if (e.type === 'assist' && e.playerId === this.playerId) {
-            assists++;
-          }
+          if (e.playerId !== this.playerId) continue;
+          if (e.type === 'goal') goals++;
+          if (e.type === 'assist') assists++;
+          if (e.type === 'yellow') yellowCards++;
+          if (e.type === 'red') redCards++;
+          if (e.type === 'own_goal') ownGoals++;
         }
       }
       const ownerFiltered = this.filteredOwnerMatches;
@@ -296,104 +338,6 @@ export default {
     },
   },
   methods: {
-    displayRating(rawScore) {
-      if (rawScore == null || isNaN(rawScore)) return 5;
-      const score = parseFloat(rawScore);
-      if (this.isAdmin || this.isSuperAdmin) return score;
-      return score < 6 ? 6 : score;
-    },
-    // 评分计算函数（与 list.vue / stats/index.vue 完全一致）
-    calculatePlayerRating(player, completedMatches) {
-      const playerId = player._id;
-      const FRONT_POSITIONS = ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];
-      const BACK_POSITIONS = ['GK', 'CB', 'LB', 'RB', 'CDM'];
-      
-      let winPoints = 0, teamMatches = 0, yellowCount = 0, redCount = 0;
-      let goals = 0, assists = 0;
-
-      for (const m of completedMatches) {
-        const inTeamA = (m.teamA?.players || []).includes(playerId);
-        const inTeamB = (m.teamB?.players || []).includes(playerId);
-        if (!inTeamA && !inTeamB) continue;
-
-        teamMatches++;
-        const aScore = m.teamA?.score || 0;
-        const bScore = m.teamB?.score || 0;
-        if (inTeamA) {
-          if (aScore > bScore) winPoints += 3;
-          else if (aScore === bScore) winPoints += 1;
-        } else {
-          if (bScore > aScore) winPoints += 3;
-          else if (bScore === aScore) winPoints += 1;
-        }
-
-        for (const e of (m.events || [])) {
-          if (e.playerId === playerId) {
-            if (e.type === 'goal') goals++;
-            if (e.type === 'yellow') yellowCount++;
-            if (e.type === 'red') redCount++;
-          }
-          if (e.type === 'goal' && e.assistById === playerId) {
-            assists++;
-          }
-          // 兼容旧格式：独立的 assist 事件
-          if (e.type === 'assist' && e.playerId === playerId) {
-            assists++;
-          }
-        }
-      }
-
-      const isFront = player.positions?.some(pos => FRONT_POSITIONS.includes(pos));
-      const isBack = player.positions?.some(pos => BACK_POSITIONS.includes(pos));
-
-      let performanceRating = 5;
-      if (teamMatches > 0) {
-        const winRate = winPoints / (teamMatches * 3);
-        const goalRate = Math.min(goals / teamMatches, 2);
-        const assistRate = Math.min(assists / teamMatches, 2);
-        const cardPenalty = (redCount * 1 + yellowCount * 0.3) / teamMatches;
-
-        if (isFront) {
-          performanceRating = 5 + winRate * 2 + goalRate * 1.5 + assistRate * 1 - cardPenalty;
-        } else if (isBack) {
-          performanceRating = 5 + winRate * 3 - cardPenalty * 0.5;
-        } else {
-          performanceRating = 5 + winRate * 2 + goalRate * 1 + assistRate * 0.5 - cardPenalty;
-        }
-        performanceRating = Math.min(10, Math.max(1, Math.round(performanceRating * 10) / 10));
-      }
-
-      const validMatchIds = new Set(completedMatches.map(m => m._id));
-      const ratings = player.ratings || {};
-      const peerRatings = (ratings.peerRatings || []).filter(r => validMatchIds.has(r.matchId));
-      const adminRatings = (ratings.adminRatings || []).filter(r => validMatchIds.has(r.matchId));
-      const initialRating = (typeof ratings.initialRating === 'number') ? ratings.initialRating : 5;
-
-      const peerAvg = peerRatings.length > 0
-        ? peerRatings.reduce((s, r) => s + r.score, 0) / peerRatings.length
-        : initialRating;
-      const adminAvg = adminRatings.length > 0
-        ? adminRatings.reduce((s, r) => s + r.score, 0) / adminRatings.length
-        : initialRating;
-
-      let compositeRating = peerAvg * 0.5 + adminAvg * 0.3 + performanceRating * 0.2;
-      compositeRating = Math.min(10, Math.max(1, Math.round(compositeRating * 10) / 10));
-
-      return {
-        compositeRating,
-        peerAvg,
-        adminAvg,
-        performanceRating,
-        teamMatches,
-        winPoints,
-        goals,
-        assists,
-        yellowCount,
-        redCount,
-        peerCount: peerRatings.length,
-        adminCount: adminRatings.length
-      };
-    },
     filterByTime(list) {
       if (!list.length) return [];
       const now = new Date();
@@ -404,6 +348,41 @@ export default {
         if (this.timeFilter === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
         return true;
       });
+    },
+    displayRating(rawScore) {
+      if (rawScore == null || isNaN(rawScore)) return 5;
+      const score = parseFloat(rawScore);
+      
+      return score < 6 ? 6 : score;
+    },
+    getMatchRating(m) {
+      const ratings = this.player?.ratings;
+      if (!ratings) return null;
+      const peer = (ratings.peerRatings || []).find(r => r.matchId === m._id);
+      const admin = (ratings.adminRatings || []).find(r => r.matchId === m._id);
+      const all = [];
+      if (peer) all.push(peer.score);
+      if (admin) all.push(admin.score);
+      if (all.length === 0) return null;
+      return all.reduce((s, r) => s + r, 0) / all.length;
+    },
+    showAllMatchRawRatings() {
+      this.allMatchRawRatingsData = this.filteredMatches.map(m => ({
+        matchTitle: m.title,
+        rawScore: this.getMatchRating(m),
+        displayScore: this.displayRating(this.getMatchRating(m)),
+        goals: (m.events || []).filter(e => e.type === 'goal' && e.playerId === this.playerId).length,
+      })).filter(m => m.rawScore !== null);
+      this.showAllMatchRawRatingsModal = true;
+    },
+    showMatchRawRatingFn(m) {
+      const raw = this.getMatchRating(m);
+      this.matchRawRatingData = { matchTitle: m.title, rawScore: raw };
+      this.showMatchRawRating = true;
+    },
+    showRawRatingModal() {
+      this.rawRatingData = this.player._liveRating;
+      this.showRawRating = true;
     },
     async loadData() {
       wx.showLoading({ title: '加载中' });
@@ -416,27 +395,20 @@ export default {
         const { data } = await db.collection('players').doc(this.playerId).get();
         this.player = data;
 
-        // 查询所有已结束的比赛（不限制报名记录，确保包含被直接分队的比赛）
-        // 分页获取所有已结束的比赛（客户端 limit 最大 100，需要循环）
-        const LIMIT = 100;
-        let allCompletedMatches = [];
-        let skip = 0;
-        while (true) {
-          const { data } = await db.collection('matches').where({ status: 'completed' }).limit(LIMIT).skip(skip).get();
-          if (data.length === 0) break;
-          allCompletedMatches = allCompletedMatches.concat(data);
-          if (data.length < LIMIT) break;
-          skip += LIMIT;
-        }
-        // 同时查询该球员的报名记录（用于显示报名状态）
-        const { data: registeredMatches } = await db.collection('matches')
+        const { data: allMatches } = await db.collection('matches')
           .where({ 'registrations.playerId': this.playerId })
           .orderBy('date', 'desc')
           .get();
 
+        // 同时查询所有已结束的比赛（用于评分计算，确保包含被直接分队的比赛）
+        const { data: allCompletedMatches } = await db.collection('matches')
+          .where({ status: 'completed' })
+          .limit(100)
+          .get();
+
         const registered = [];
         const confirmed = [];
-        for (const m of registeredMatches) {
+        for (const m of allMatches) {
           const reg = m.registrations.find(r => r.playerId === this.playerId);
           if (!reg) continue;
           const enriched = { ...m, _regStatus: reg.status };
@@ -453,25 +425,84 @@ export default {
         this.registeredMatches = registered;
         this.confirmedMatches = confirmed;
 
-        // 使用所有已结束比赛计算评分和参赛历史（只包含该球员实际参加的比赛）
-        const playerMatches = allCompletedMatches.filter(m => {
-          const inA = (m.teamA?.players || []).includes(this.playerId);
-          const inB = (m.teamB?.players || []).includes(this.playerId);
-          return inA || inB;
-        });
-        this.matches = playerMatches;
+        const completed = allMatches.filter(m => m.status === 'completed');
+        this.matches = completed;
 
-        // 实时计算综合评分（只基于实际参赛的比赛）
-        const rating = this.calculatePlayerRating(data, playerMatches);
+        // 实时计算综合评分（与云函数一致）
+        const FRONT_POSITIONS = ['ST', 'CF', 'LW', 'RW', 'CAM', 'CM'];
+        const BACK_POSITIONS = ['GK', 'CB', 'LB', 'RB', 'CDM'];
+        const validMatchIds = new Set(completed.map(m => m._id));
+
+        let winPoints = 0, teamMatches = 0, yellowCount = 0, redCount = 0;
+        let goals = 0, assists = 0;
+        for (const m of completed) {
+          const inA = m.teamA?.players?.includes(this.playerId);
+          const inB = m.teamB?.players?.includes(this.playerId);
+          if (!inA && !inB) continue;
+          teamMatches++;
+          const aScore = m.teamA?.score || 0, bScore = m.teamB?.score || 0;
+          if (inA) {
+            if (aScore > bScore) winPoints += 3;
+            else if (aScore === bScore) winPoints += 1;
+          } else {
+            if (bScore > aScore) winPoints += 3;
+            else if (bScore === aScore) winPoints += 1;
+          }
+          for (const e of (m.events || [])) {
+            if (e.playerId === this.playerId) {
+              if (e.type === 'goal') goals++;
+              if (e.type === 'assist') assists++;
+              if (e.type === 'yellow') yellowCount++;
+              if (e.type === 'red') redCount++;
+            }
+          }
+        }
+
+        const isFront = data.positions?.some(pos => FRONT_POSITIONS.includes(pos));
+        const isBack = data.positions?.some(pos => BACK_POSITIONS.includes(pos));
+
+        let performanceRating = 5;
+        if (teamMatches > 0) {
+          const winRate = winPoints / (teamMatches * 3);
+          const goalRate = Math.min(goals / teamMatches, 2);
+          const assistRate = Math.min(assists / teamMatches, 2);
+          const cardPenalty = (redCount * 1 + yellowCount * 0.3) / teamMatches;
+
+          if (isFront) {
+            performanceRating = 5 + winRate * 2 + goalRate * 1.5 + assistRate * 1 - cardPenalty;
+          } else if (isBack) {
+            performanceRating = 5 + winRate * 3 - cardPenalty * 0.5;
+          } else {
+            performanceRating = 5 + winRate * 2 + goalRate * 1 + assistRate * 0.5 - cardPenalty;
+          }
+          performanceRating = Math.min(10, Math.max(1, Math.round(performanceRating * 10) / 10));
+        }
+
+        // 互评和管理员评分（只统计已结束比赛）
+        const ratings = data.ratings || {};
+        const peerRatings = (ratings.peerRatings || []).filter(r => validMatchIds.has(r.matchId));
+        const adminRatings = (ratings.adminRatings || []).filter(r => validMatchIds.has(r.matchId));
+        const initialRating = (typeof ratings.initialRating === 'number') ? ratings.initialRating : 5;
+
+        const peerAvg = peerRatings.length > 0
+          ? peerRatings.reduce((s, r) => s + r.score, 0) / peerRatings.length
+          : initialRating;
+        const adminAvg = adminRatings.length > 0
+          ? adminRatings.reduce((s, r) => s + r.score, 0) / adminRatings.length
+          : initialRating;
+
+        // 综合评分 = 互评50% + 管理员30% + 表现20%
+        let compositeRating = peerAvg * 0.5 + adminAvg * 0.3 + performanceRating * 0.2;
+        compositeRating = Math.min(10, Math.max(1, Math.round(compositeRating * 10) / 10));
 
         // 将实时计算的评分挂载到 player 对象上
         this.player = {
           ...data,
           _liveRating: {
-            compositeRating: rating.compositeRating,
-            peerAvg: rating.peerAvg,
-            adminAvg: rating.adminAvg,
-            performanceRating: rating.performanceRating
+            compositeRating,
+            peerAvg,
+            adminAvg,
+            performanceRating
           }
         };
 
@@ -483,8 +514,7 @@ export default {
         this.ownerMatches = roleRes.ownerMatches || [];
         this.assistantMatches = roleRes.assistantMatches || [];
 
-        // 评分历史（只显示实际参赛的比赛中的评分）
-        const playerMatchIds = new Set(playerMatches.map(m => m._id));
+        // 评分历史（使用原始 ratings 数据）
         const allRatings = data.ratings || {};
         const allPeerRatings = allRatings.peerRatings || [];
         const allAdminRatings = allRatings.adminRatings || [];
@@ -493,9 +523,9 @@ export default {
           ...allAdminRatings.map(r => r.matchId)
         ]);
         const matchMap = {};
-        for (const m of playerMatches) matchMap[m._id] = m;
+        for (const m of completed) matchMap[m._id] = m;
 
-        this.ratingHistory = [...allMatchIds].filter(mid => playerMatchIds.has(mid)).map(mid => {
+        this.ratingHistory = [...allMatchIds].map(mid => {
           const peer = allPeerRatings.find(r => r.matchId === mid);
           const admin = allAdminRatings.find(r => r.matchId === mid);
           const match = matchMap[mid];
@@ -516,20 +546,6 @@ export default {
       }
       wx.hideLoading();
     },
-    getMatchRating(m) {
-      const ratings = this.player?.ratings;
-      if (!ratings) return null;
-      const peer = (ratings.peerRatings || []).find(r => r.matchId === m._id);
-      const admin = (ratings.adminRatings || []).find(r => r.matchId === m._id);
-      const all = [];
-      if (peer) all.push(peer.score);
-      if (admin) all.push(admin.score);
-      if (all.length === 0) return null;
-      return all.reduce((s, r) => s + r, 0) / all.length;
-    },
-    getMatchGoals(m) {
-      return (m.events || []).filter(e => e.type === 'goal' && e.playerId === this.playerId).length;
-    },
     getPositions(p) {
       if (!p?.positions) return '';
       return p.positions.map(pos => POSITIONS.find(pt => pt.id === pos)?.name || pos).join(' · ');
@@ -548,10 +564,6 @@ export default {
     },
 
     // ===== 管理员操作 =====
-    showRawRatingModal() {
-      this.rawRatingData = this.player._liveRating;
-      this.showRawRating = true;
-    },
     editPlayerInfo() {
       uni.navigateTo({ url: `/pages/players/create?playerId=${this.playerId}` });
     },
@@ -676,8 +688,8 @@ export default {
 
 /* 参赛历史徽章 */
 .history-badges { display: flex; align-items: center; gap: 12rpx; margin-top: 8rpx; flex-wrap: wrap; }
-.badge-goal { font-size: 22rpx; color: #dc2626; font-weight: 700; background: #fee2e2; padding: 2rpx 10rpx; border-radius: 8rpx; }
 .badge-rating { font-size: 22rpx; color: #f59e0b; font-weight: 700; background: #fef3c7; padding: 2rpx 10rpx; border-radius: 8rpx; }
+.badge-rating.admin-clickable { cursor: pointer; border: 2rpx solid #f59e0b; }
 
 /* 管理员查看原始评分按钮 */
 .admin-raw-rating-btn { text-align: center; padding: 16rpx 0; margin-top: 16rpx; background: #f0f9ff; color: #0369a1; border-radius: 12rpx; font-size: 26rpx; font-weight: 600; }

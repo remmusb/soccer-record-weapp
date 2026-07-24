@@ -60,6 +60,7 @@
       <view class="right-box">
         <view class="rating-num">{{getHistoricalRating(p) || '5.0'}}</view>
         <view class="rating-label">评分</view>
+        <view v-if="isAdmin || isSuperAdmin" class="raw-rating-btn" @click.stop="showRawRating(p)">👁️</view>
         <view v-if="isAdmin" class="delete-btn" @click.stop="deletePlayer(p._id)">🗑️</view>
       </view>
     </view>
@@ -67,6 +68,42 @@
     <view class="empty" v-if="players.length === 0">
       <view class="empty-icon">👤</view>
       <view class="empty-text">还没有球员，点击上方添加</view>
+    </view>
+
+    <!-- 原始评分弹窗（管理员专用） -->
+    <view class="modal-overlay" v-if="showRawRatingModal" @click="showRawRatingModal = false">
+      <view class="modal-popup" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">🔍 原始评分</text>
+          <text class="modal-close" @click="showRawRatingModal = false">✕</text>
+        </view>
+        <view class="modal-body" v-if="rawRatingPlayer">
+          <view class="raw-rating-row">
+            <text class="raw-label">球员</text>
+            <text class="raw-value">{{rawRatingPlayer.nickname}}</text>
+          </view>
+          <view class="raw-rating-row">
+            <text class="raw-label">队友互评</text>
+            <text class="raw-value">{{rawRatingPlayer._peerAvg?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row">
+            <text class="raw-label">系统评分</text>
+            <text class="raw-value">{{rawRatingPlayer._adminAvg?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row">
+            <text class="raw-label">比赛表现</text>
+            <text class="raw-value">{{rawRatingPlayer._performanceRating?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row total">
+            <text class="raw-label">综合评分（原始）</text>
+            <text class="raw-value">{{rawRatingPlayer._compositeRating?.toFixed(1) || '5.0'}}</text>
+          </view>
+          <view class="raw-rating-row total">
+            <text class="raw-label">综合评分（显示）</text>
+            <text class="raw-value">{{getHistoricalRating(rawRatingPlayer)}}</text>
+          </view>
+        </view>
+      </view>
     </view>
   </view>
 </template>
@@ -80,7 +117,7 @@ const POSITIONS = [
   { id: 'ST', name: '前锋' }, { id: 'CF', name: '中锋' },
 ];
 export default {
-  data() { return { players: [], isAdmin: false, sortBy: 'rating', completedMatches: [] } },
+  data() { return { players: [], isAdmin: false, isSuperAdmin: false, sortBy: 'rating', completedMatches: [], showRawRatingModal: false, rawRatingPlayer: null } },
   computed: {
     totalAppearances() {
       return this.players.reduce((sum, p) => sum + (p.stats?.appearances || 0), 0);
@@ -208,6 +245,7 @@ export default {
       try {
         const { result } = await wx.cloud.callFunction({ name: 'login' });
         this.isAdmin = result.isAdmin || false;
+        this.isSuperAdmin = result.isSuperAdmin || false;
 
         const { result: playerResult } = await wx.cloud.callFunction({ name: 'getPlayers' });
         const players = playerResult.players || [];
@@ -277,10 +315,14 @@ export default {
       // 统一显示综合评分（互评×50% + 管理员×30% + 表现×20%）
       if (p._compositeRating !== undefined && !isNaN(p._compositeRating)) {
         const raw = parseFloat(p._compositeRating);
-        if (this.isAdmin) return raw.toFixed(1);
+        
         return (raw < 6 ? 6 : raw).toFixed(1);
       }
       return '5.0';
+    },
+    showRawRating(p) {
+      this.rawRatingPlayer = p;
+      this.showRawRatingModal = true;
     },
     goCreate() { uni.navigateTo({ url: '/pages/players/create' }) },
     goDetail(id) { uni.navigateTo({ url: `/pages/players/detail?id=${id}` }) },
@@ -356,4 +398,18 @@ export default {
 .empty { text-align: center; padding: 120rpx 40rpx; }
 .empty-icon { font-size: 80rpx; margin-bottom: 20rpx; }
 .empty-text { font-size: 28rpx; color: #94a3b8; }
+
+.raw-rating-btn { font-size: 28rpx; padding: 4rpx 8rpx; }
+
+/* 原始评分弹窗 */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-popup { background: #fff; border-radius: 20rpx; width: 80%; max-height: 60vh; display: flex; flex-direction: column; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 24rpx 28rpx; border-bottom: 2rpx solid #f1f5f9; }
+.modal-title { font-size: 32rpx; font-weight: 700; color: #1e293b; }
+.modal-close { font-size: 36rpx; color: #94a3b8; padding: 8rpx; }
+.modal-body { padding: 24rpx 28rpx; }
+.raw-rating-row { display: flex; justify-content: space-between; padding: 16rpx 0; border-bottom: 2rpx solid #f3f4f6; }
+.raw-rating-row.total { border-bottom: none; font-weight: 700; }
+.raw-label { font-size: 28rpx; color: #4b5563; }
+.raw-value { font-size: 28rpx; color: #1e293b; font-weight: 700; }
 </style>

@@ -300,7 +300,7 @@
       <view class="card" v-if="match.status === 'completed' && match.ratingOpen">
         <view class="section-header">
           <view class="section-title">⭐ 评分</view>
-          <text v-if="isAdmin" class="admin-raw-btn" @click="showMatchRawRatings">👁️ 查看原始评分</text>
+          <text v-if="isAdmin || isSuperAdmin" class="admin-raw-btn" @click="showMatchRawRatings">👁️ 查看原始评分</text>
         </view>
         <view class="rating-list">
           <view class="rating-item" v-for="(pid, idx) in confirmedPlayerIds" :key="pid">
@@ -1301,7 +1301,7 @@ export default {
     displayRating(rawScore) {
       if (rawScore == null || isNaN(rawScore)) return 5;
       const score = parseFloat(rawScore);
-      if (this.isAdmin || this.isSuperAdmin) return score;
+      
       return score < 6 ? 6 : score;
     },
     getPlayerYellows(pid) {
