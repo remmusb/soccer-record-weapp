@@ -492,22 +492,36 @@ export default {
       const ownerId = this.match.ownerId;
       const assistantIds = this.match.assistantIds || [];
       const isProtected = (r) => r.playerId === ownerId || assistantIds.includes(r.playerId);
-      const sorted = [...this.rawRegistrations].sort((a, b) => {
+      const getPriority = (r) => {
+        if (r.status === 'confirmed') return 2;
+        if (r.status === 'screenshot_uploaded' || r.status === 'pending_screenshot') return 1;
+        return 0;
+      };
+      
+      // 先过滤掉已取消的报名
+      const activeRegistrations = this.rawRegistrations.filter(r => r.status !== 'cancelled');
+      
+      // 如果存在手动排序标记，直接使用 registrations 顺序不再重新排序
+      if (this.match.manualSort) {
+        return activeRegistrations.map((r, idx) => ({
+          ...r,
+          displayIndex: idx + 1,
+          isWL: idx >= maxPlayers
+        }));
+      }
+      
+      const sorted = [...activeRegistrations].sort((a, b) => {
         // 1. 场主/护法优先级最高
         const protectedA = isProtected(a) ? 1 : 0;
         const protectedB = isProtected(b) ? 1 : 0;
         if (protectedA !== protectedB) return protectedB - protectedA;
 
-        // 2. 取消的排最后
-        if (a.status === 'cancelled' && b.status !== 'cancelled') return 1;
-        if (b.status === 'cancelled' && a.status !== 'cancelled') return -1;
+        // 2. 已确认(confirmed) 优先级最高；已上传截图但未确认 和 未上传截图 同优先级
+        const priA = getPriority(a);
+        const priB = getPriority(b);
+        if (priA !== priB) return priB - priA;
 
-        // 3. 有截图的（confirmed / screenshot_uploaded）> 没有截图的（pending_screenshot）
-        const hasScreenshotA = a.status === 'confirmed' || a.status === 'screenshot_uploaded';
-        const hasScreenshotB = b.status === 'confirmed' || b.status === 'screenshot_uploaded';
-        if (hasScreenshotA !== hasScreenshotB) return hasScreenshotB ? 1 : -1;
-
-        // 4. 同组内严格按照报名时间排序（包括临时球员/代报名）
+        // 3. 同组内严格按照报名时间排序（包括临时球员/代报名）
         const regTimeA = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
         const regTimeB = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
         return regTimeA - regTimeB;
@@ -525,9 +539,10 @@ export default {
       return this.players[this.match.ownerId]?.nickname || '待定';
     },
     confirmedPlayerIds() {
-      // 评分权限以分队名单为准，排除临时球员
-      const teamAPlayers = (this.match.teamA?.players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_'));
-      const teamBPlayers = (this.match.teamB?.players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_'));
+      // 评分权限以分队名单为准，排除临时球员和已取消报名球员
+      const activeIds = new Set(this.rawRegistrations.filter(r => r.status !== 'cancelled').map(r => r.playerId));
+      const teamAPlayers = (this.match.teamA?.players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_') && activeIds.has(pid));
+      const teamBPlayers = (this.match.teamB?.players || []).filter(pid => typeof pid === 'string' && !pid.startsWith('temp_') && activeIds.has(pid));
       return [...new Set([...teamAPlayers, ...teamBPlayers])];
     },
     matchRatings() {
@@ -565,10 +580,12 @@ export default {
         .sort((a, b) => (a.minute || 0) - (b.minute || 0));
     },
     teamAPlayersFiltered() {
-      return (this.match.teamA?.players || []).filter(pid => !this.players[pid]?._isTempPlayer);
+      const activeIds = new Set(this.rawRegistrations.filter(r => r.status !== 'cancelled').map(r => r.playerId));
+      return (this.match.teamA?.players || []).filter(pid => !this.players[pid]?._isTempPlayer && activeIds.has(pid));
     },
     teamBPlayersFiltered() {
-      return (this.match.teamB?.players || []).filter(pid => !this.players[pid]?._isTempPlayer);
+      const activeIds = new Set(this.rawRegistrations.filter(r => r.status !== 'cancelled').map(r => r.playerId));
+      return (this.match.teamB?.players || []).filter(pid => !this.players[pid]?._isTempPlayer && activeIds.has(pid));
     },
     // 按被评人分组的互评记录
     groupedPeerRatings() {
@@ -803,7 +820,7 @@ export default {
           return original || r;
         });
         await db.collection('matches').doc(this.matchId).update({
-          data: { registrations: newOrder }
+          data: { registrations: newOrder, manualSort: true }
         });
         this.match.registrations = newOrder;
         this.isSortingMode = false;

@@ -86,8 +86,19 @@ exports.main = async (event, context) => {
       
       registrations.splice(idx, 1);
       
+      // 从分队名单中移除（如果已分队）
+      const updateData = { registrations };
+      const teamA = match.teamA || { players: [] };
+      const teamB = match.teamB || { players: [] };
+      if (teamA.players.includes(targetId)) {
+        updateData['teamA.players'] = teamA.players.filter(p => p !== targetId);
+      }
+      if (teamB.players.includes(targetId)) {
+        updateData['teamB.players'] = teamB.players.filter(p => p !== targetId);
+      }
+      
       await db.collection('matches').doc(matchId).update({
-        data: { registrations }
+        data: updateData
       });
       
       return { success: true, message: '已取消报名' };
@@ -225,8 +236,19 @@ exports.main = async (event, context) => {
       
       registrations.splice(idx, 1);
       
+      // 从分队名单中移除（如果已分队）
+      const updateData = { registrations };
+      const teamA = match.teamA || { players: [] };
+      const teamB = match.teamB || { players: [] };
+      if (teamA.players.includes(targetId)) {
+        updateData['teamA.players'] = teamA.players.filter(p => p !== targetId);
+      }
+      if (teamB.players.includes(targetId)) {
+        updateData['teamB.players'] = teamB.players.filter(p => p !== targetId);
+      }
+      
       await db.collection('matches').doc(matchId).update({
-        data: { registrations }
+        data: updateData
       });
       
       return { success: true, message: '移除成功' };
