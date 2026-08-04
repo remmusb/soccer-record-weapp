@@ -69,9 +69,16 @@ exports.main = async (event, context) => {
   }
   
   try {
+    console.log('[updateMatch] updating match:', matchId, 'data:', JSON.stringify(updateData));
     await db.collection('matches').doc(matchId).update({ data: updateData });
-    return { success: true };
+    
+    // 验证更新结果
+    const { data: updated } = await db.collection('matches').doc(matchId).get();
+    console.log('[updateMatch] updated teamA.score:', updated.teamA?.score, 'teamB.score:', updated.teamB?.score);
+    
+    return { success: true, updatedScore: { a: updated.teamA?.score, b: updated.teamB?.score } };
   } catch (e) {
+    console.error('[updateMatch] update failed:', e);
     return { success: false, error: e.message };
   }
 };

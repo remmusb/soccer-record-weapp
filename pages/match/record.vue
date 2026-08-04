@@ -398,15 +398,23 @@ export default {
     async saveAll() {
       wx.showLoading({ title: '保存中' });
       try {
-        await db.collection('matches').doc(this.matchId).update({
+        const { result } = await wx.cloud.callFunction({
+          name: 'updateMatch',
           data: {
-            'teamA.score': this.match.teamA.score,
-            'teamB.score': this.match.teamB.score,
-            events: this.match.events,
+            matchId: this.matchId,
+            updateData: {
+              'teamA.score': this.match.teamA.score,
+              'teamB.score': this.match.teamB.score,
+              events: this.match.events,
+            }
           }
         });
-        uni.showToast({ title: '保存成功' });
-        setTimeout(() => uni.navigateBack(), 800);
+        if (result.success) {
+          uni.showToast({ title: '保存成功' });
+          setTimeout(() => uni.navigateBack(), 800);
+        } else {
+          uni.showToast({ title: result.error || '保存失败', icon: 'none' });
+        }
       } catch (e) {
         console.error('保存失败', e);
         uni.showToast({ title: '保存失败', icon: 'none' });

@@ -603,6 +603,12 @@ export default {
     this.matchId = options.id;
     this.loadMatch();
   },
+  onShow() {
+    // 返回时刷新数据（如从记录赛况页面返回）
+    if (this.matchId && !this.loading) {
+      this.loadMatch();
+    }
+  },
   onShareAppMessage() {
     const title = this.match.title || '比赛';
     const score = this.match.status === 'completed' 
@@ -767,10 +773,19 @@ export default {
     async toggleRegistration() {
       const newVal = !this.match.registrationClosed;
       try {
-        await db.collection('matches').doc(this.matchId).update({ data: { registrationClosed: newVal } });
-        this.match.registrationClosed = newVal;
-        uni.showToast({ title: newVal ? '已关闭报名' : '已开启报名' });
+        wx.showLoading({ title: '处理中' });
+        const { result } = await wx.cloud.callFunction({
+          name: 'updateMatch',
+          data: { matchId: this.matchId, updateData: { registrationClosed: newVal } }
+        });
+        if (result.success) {
+          this.match.registrationClosed = newVal;
+          uni.showToast({ title: newVal ? '已关闭报名' : '已开启报名' });
+        } else {
+          uni.showToast({ title: result.error || '操作失败', icon: 'none' });
+        }
       } catch (e) { uni.showToast({ title: '操作失败', icon: 'none' }); }
+      wx.hideLoading();
     },
 
     // 手动排序模式
@@ -819,14 +834,19 @@ export default {
           const original = (this.match.registrations || []).find(orig => orig.playerId === r.playerId);
           return original || r;
         });
-        await db.collection('matches').doc(this.matchId).update({
-          data: { registrations: newOrder, manualSort: true }
+        const { result } = await wx.cloud.callFunction({
+          name: 'updateMatch',
+          data: { matchId: this.matchId, updateData: { registrations: newOrder, manualSort: true } }
         });
-        this.match.registrations = newOrder;
-        this.isSortingMode = false;
-        this.sortableRegistrations = [];
-        uni.showToast({ title: '排序已保存' });
-        this.loadMatch();
+        if (result.success) {
+          this.match.registrations = newOrder;
+          this.isSortingMode = false;
+          this.sortableRegistrations = [];
+          uni.showToast({ title: '排序已保存' });
+          this.loadMatch();
+        } else {
+          uni.showToast({ title: result.error || '保存失败', icon: 'none' });
+        }
       } catch (e) {
         console.error('保存排序失败', e);
         uni.showToast({ title: '保存失败', icon: 'none' });
@@ -859,8 +879,15 @@ export default {
           if (res.confirm) {
             wx.showLoading({ title: '处理中' });
             try {
-              await db.collection('matches').doc(this.matchId).update({ data: { status: 'ongoing' } });
-              uni.showToast({ title: '比赛已开始' }); this.loadMatch();
+              const { result } = await wx.cloud.callFunction({
+                name: 'updateMatch',
+                data: { matchId: this.matchId, updateData: { status: 'ongoing' } }
+              });
+              if (result.success) {
+                uni.showToast({ title: '比赛已开始' }); this.loadMatch();
+              } else {
+                uni.showToast({ title: result.error || '开始失败', icon: 'none' });
+              }
             } catch (e) { uni.showToast({ title: '开始失败', icon: 'none' }); }
             wx.hideLoading();
           }
@@ -876,8 +903,15 @@ export default {
           if (res.confirm) {
             wx.showLoading({ title: '处理中' });
             try {
-              await db.collection('matches').doc(this.matchId).update({ data: { status: 'completed' } });
-              uni.showToast({ title: '比赛已结束' }); this.loadMatch();
+              const { result } = await wx.cloud.callFunction({
+                name: 'updateMatch',
+                data: { matchId: this.matchId, updateData: { status: 'completed' } }
+              });
+              if (result.success) {
+                uni.showToast({ title: '比赛已结束' }); this.loadMatch();
+              } else {
+                uni.showToast({ title: result.error || '结束失败', icon: 'none' });
+              }
             } catch (e) { uni.showToast({ title: '结束失败', icon: 'none' }); }
             wx.hideLoading();
           }
@@ -889,12 +923,19 @@ export default {
       const newVal = !this.match.ratingOpen;
       try {
         wx.showLoading({ title: '处理中' });
-        await db.collection('matches').doc(this.matchId).update({ data: { ratingOpen: newVal } });
-        this.match.ratingOpen = newVal;
-        uni.showToast({ title: newVal ? '评分已开启' : '评分已关闭' });
-        if (newVal) {
-          try { await wx.cloud.callFunction({ name: 'sendNotification', data: { type: 'rating_open', matchId: this.matchId } }); }
-          catch (e) { console.error('评分通知发送失败', e); }
+        const { result } = await wx.cloud.callFunction({
+          name: 'updateMatch',
+          data: { matchId: this.matchId, updateData: { ratingOpen: newVal } }
+        });
+        if (result.success) {
+          this.match.ratingOpen = newVal;
+          uni.showToast({ title: newVal ? '评分已开启' : '评分已关闭' });
+          if (newVal) {
+            try { await wx.cloud.callFunction({ name: 'sendNotification', data: { type: 'rating_open', matchId: this.matchId } }); }
+            catch (e) { console.error('评分通知发送失败', e); }
+          }
+        } else {
+          uni.showToast({ title: result.error || '操作失败', icon: 'none' });
         }
       } catch (e) { uni.showToast({ title: '操作失败', icon: 'none' }); }
       wx.hideLoading();
@@ -1288,8 +1329,17 @@ export default {
       uni.showActionSheet({
         itemList: items,
         success: async (res) => {
-          try { await db.collection('matches').doc(this.matchId).update({ data: { mvp: [ids[res.tapIndex]] } }); uni.showToast({ title: 'MVP 已指定' }); this.loadMatch(); }
-          catch (e) { uni.showToast({ title: '指定失败', icon: 'none' }); }
+          try {
+            const { result } = await wx.cloud.callFunction({
+              name: 'updateMatch',
+              data: { matchId: this.matchId, updateData: { mvp: [ids[res.tapIndex]] } }
+            });
+            if (result.success) {
+              uni.showToast({ title: 'MVP 已指定' }); this.loadMatch();
+            } else {
+              uni.showToast({ title: result.error || '指定失败', icon: 'none' });
+            }
+          } catch (e) { uni.showToast({ title: '指定失败', icon: 'none' }); }
         }
       });
     },

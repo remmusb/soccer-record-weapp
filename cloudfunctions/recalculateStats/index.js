@@ -133,7 +133,17 @@ exports.main = async (event, context) => {
         if (!matchPlayerStats[evtPid]) {
           matchPlayerStats[evtPid] = { score: 5, goals: 0, assists: 0 };
         }
-        if (e.type === 'goal') { statsMap[evtPid].goals++; matchPlayerStats[evtPid].goals++; }
+        if (e.type === 'goal') {
+          statsMap[evtPid].goals++;
+          matchPlayerStats[evtPid].goals++;
+          // 新格式助攻：goal 事件中的 assistById
+          if (e.assistById && statsMap[e.assistById]) {
+            statsMap[e.assistById].assists++;
+            if (!matchPlayerStats[e.assistById]) matchPlayerStats[e.assistById] = { score: 5, goals: 0, assists: 0 };
+            matchPlayerStats[e.assistById].assists++;
+          }
+        }
+        // 旧格式助攻：独立的 assist 事件
         if (e.type === 'assist') { statsMap[evtPid].assists++; matchPlayerStats[evtPid].assists++; }
         if (e.type === 'yellow') statsMap[evtPid].yellowCards++;
         if (e.type === 'red') statsMap[evtPid].redCards++;
@@ -211,6 +221,7 @@ exports.main = async (event, context) => {
         data: { 
           stats: {
             appearances: s.appearances,
+            games: s.appearances,
             goals: s.goals,
             assists: s.assists,
             wins: s.wins,

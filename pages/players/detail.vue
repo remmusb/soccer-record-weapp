@@ -312,9 +312,12 @@ export default {
           if (bWin) wins++; else if (draw) draws++; else losses++;
         }
         for (const e of (m.events || [])) {
+          // 进球
+          if (e.type === 'goal' && e.playerId === this.playerId) goals++;
+          // 助攻：兼容新旧两种格式（新格式：goal 事件中的 assistById；旧格式：独立的 assist 事件）
+          if ((e.type === 'goal' && e.assistById === this.playerId) || (e.type === 'assist' && e.playerId === this.playerId)) assists++;
+          // 黄牌/红牌/乌龙球只统计 playerId 匹配的
           if (e.playerId !== this.playerId) continue;
-          if (e.type === 'goal') goals++;
-          if (e.type === 'assist') assists++;
           if (e.type === 'yellow') yellowCards++;
           if (e.type === 'red') redCards++;
           if (e.type === 'own_goal') ownGoals++;
@@ -449,12 +452,11 @@ export default {
             else if (bScore === aScore) winPoints += 1;
           }
           for (const e of (m.events || [])) {
-            if (e.playerId === this.playerId) {
-              if (e.type === 'goal') goals++;
-              if (e.type === 'assist') assists++;
-              if (e.type === 'yellow') yellowCount++;
-              if (e.type === 'red') redCount++;
-            }
+            if (e.type === 'goal' && e.playerId === this.playerId) goals++;
+            if ((e.type === 'goal' && e.assistById === this.playerId) || (e.type === 'assist' && e.playerId === this.playerId)) assists++;
+            if (e.playerId !== this.playerId) continue;
+            if (e.type === 'yellow') yellowCount++;
+            if (e.type === 'red') redCount++;
           }
         }
 
