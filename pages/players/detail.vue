@@ -237,7 +237,7 @@
           <view class="history-title">{{m.title}}</view>
           <view class="history-meta">{{m.date}} {{m.time}} · {{m.location || '待定'}}</view>
           <view class="history-badges">
-            <text v-if="getMatchRating(m)" class="badge-rating" :class="{'admin-clickable': isAdmin || isSuperAdmin}" @click.stop="(isAdmin || isSuperAdmin) && showMatchRawRatingFn(m)">⭐{{displayRating(getMatchRating(m)).toFixed(1)}}</text>
+            <text v-if="(isAdmin || isSuperAdmin) && getMatchRating(m)" class="badge-rating admin-clickable" @click.stop="showMatchRawRatingFn(m)">⭐{{displayRating(getMatchRating(m)).toFixed(1)}}</text>
           </view>
         </view>
         <view class="history-result" :class="getResultClass(m)">{{getResult(m)}}</view>
