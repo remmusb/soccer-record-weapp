@@ -16,6 +16,7 @@
         <view v-else class="captain-hint">
           <text class="hint-icon">🎯</text>
           <text class="hint-text">轮到 {{currentPicker === 'A' ? 'A队' : 'B队'}} 队长选人</text>
+          <text style="font-size:22rpx;color:#92400e;margin-left:8rpx">({{pickOrder === 'alternate' ? 'ABAB轮流' : 'ABBA蛇形'}})</text>
         </view>
         <view class="captain-tags" v-if="captainA || captainB">
           <view class="captain-tag captain-a" v-if="captainA">
@@ -157,6 +158,9 @@ export default {
       captainA: '',
       captainB: '',
       currentPicker: 'A',
+      pickOrder: 'alternate', // 'alternate' = ABAB, 'snake' = ABBA
+      pickRound: 0,
+      pickCount: 0,
     }
   },
   onLoad(options) {
@@ -370,15 +374,26 @@ export default {
       this.captainA = '';
       this.captainB = '';
       this.currentPicker = 'A';
-      uni.showToast({ title: '请先设置两队队长', icon: 'none' });
+      this.pickOrder = 'alternate';
+      this.pickRound = 0;
+      this.pickCount = 0;
+      // 弹出模式选择
+      uni.showActionSheet({
+        title: '选择选人顺序',
+        itemList: ['ABAB 轮流（A先）', 'ABBA 蛇形（A先）'],
+        success: (res) => {
+          this.pickOrder = res.tapIndex === 0 ? 'alternate' : 'snake';
+          uni.showToast({ title: '请先设置两队队长', icon: 'none' });
+        }
+      });
     },
     setCaptainA(playerId) {
       this.captainA = playerId;
       this.match.teamA.players = [playerId];
       this.match.teamA.captainId = playerId;
       if (this.captainB) {
-        this.currentPicker = 'B';
-        uni.showToast({ title: 'B队队长先选', icon: 'none' });
+        this.currentPicker = 'A';
+        uni.showToast({ title: 'A队队长先选', icon: 'none' });
       }
     },
     setCaptainB(playerId) {
@@ -393,10 +408,25 @@ export default {
     captainPickPlayer(playerId, team) {
       if (team === 'A') {
         this.match.teamA.players.push(playerId);
-        this.currentPicker = 'B';
       } else {
         this.match.teamB.players.push(playerId);
-        this.currentPicker = 'A';
+      }
+      this.pickCount++;
+      // 计算下一个选人者
+      if (this.pickOrder === 'alternate') {
+        // ABAB: A→B→A→B
+        this.currentPicker = this.currentPicker === 'A' ? 'B' : 'A';
+      } else {
+        // ABBA 蛇形: A→B→B→A→A→B→B→A...
+        const round = Math.floor(this.pickCount / 2);
+        const posInRound = this.pickCount % 2;
+        if (round % 2 === 0) {
+          // 偶数轮: A先B后
+          this.currentPicker = posInRound === 0 ? 'B' : 'A';
+        } else {
+          // 奇数轮: B先A后
+          this.currentPicker = posInRound === 0 ? 'A' : 'B';
+        }
       }
     },
     
@@ -429,6 +459,9 @@ export default {
       this.captainA = '';
       this.captainB = '';
       this.currentPicker = 'A';
+      this.pickOrder = 'alternate';
+      this.pickRound = 0;
+      this.pickCount = 0;
     },
     moveToB(id) {
       this.match.teamA.players = this.match.teamA.players.filter(pid => pid !== id);
@@ -447,16 +480,28 @@ export default {
     async save() {
       wx.showLoading({ title: '保存中' });
       try {
+        const updateData = {
+          'teamA.color': this.match.teamA.color || '',
+          'teamB.color': this.match.teamB.color || '',
+          'teamA.captainId': this.match.teamA.captainId || '',
+          'teamB.captainId': this.match.teamB.captainId || '',
+          'teamA.players': this.match.teamA.players || [],
+          'teamB.players': this.match.teamB.players || []
+        };
+        // 队长选人模式下保存 captainPick 状态
+        if (this.captainPickMode && this.captainA && this.captainB) {
+          updateData.captainPick = {
+            captainA: this.captainA,
+            captainB: this.captainB,
+            pickOrder: this.pickOrder,
+            currentPicker: this.currentPicker,
+            pickCount: this.pickCount,
+            status: 'picking'
+          };
+        }
         await wx.cloud.callFunction({
           name: 'updateMatch',
-          data: { matchId: this.matchId, updateData: {
-            'teamA.color': this.match.teamA.color || '',
-            'teamB.color': this.match.teamB.color || '',
-            'teamA.captainId': this.match.teamA.captainId || '',
-            'teamB.captainId': this.match.teamB.captainId || '',
-            'teamA.players': this.match.teamA.players || [],
-            'teamB.players': this.match.teamB.players || []
-          } }
+          data: { matchId: this.matchId, updateData }
         });
         if (this.isAdmin) {
           try {

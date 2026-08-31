@@ -179,6 +179,21 @@
         </view>
       </view>
       
+      <!-- 队长选人入口 -->
+      <view class="card captain-pick-card" v-if="isCaptainPicker && match.status === 'upcoming'">
+        <view class="captain-pick-header">
+          <text class="captain-pick-title">🏆 队长选人</text>
+          <text class="captain-pick-status">{{match.captainPick?.status === 'done' ? '已完成' : '进行中'}}</text>
+        </view>
+        <view class="captain-pick-info" v-if="match.captainPick?.status !== 'done'">
+          <text>模式：{{match.captainPick?.pickOrder === 'alternate' ? 'ABAB轮流' : 'ABBA蛇形'}}</text>
+          <text>当前轮到：{{match.captainPick?.currentPicker === 'A' ? 'A队' : 'B队'}}队长</text>
+        </view>
+        <view class="btn-primary" style="margin-top: 16rpx" @click="goCaptainPick">
+          {{match.captainPick?.status === 'done' ? '查看分队结果' : '进入选人'}}
+        </view>
+      </view>
+      
       <!-- 场主/护法 -->
       <view class="card" v-if="match.ownerId || (match.assistantIds || []).length > 0">
         <view class="section-header" @click="match.status === 'completed' && toggleCollapse('owner')">
@@ -598,6 +613,11 @@ export default {
       }
       return Object.values(groups);
     },
+    isCaptainPicker() {
+      const cp = this.match.captainPick;
+      if (!cp) return false;
+      return this.currentPlayerId === cp.captainA || this.currentPlayerId === cp.captainB;
+    },
   },
   onLoad(options) {
     this.matchId = options.id;
@@ -856,6 +876,9 @@ export default {
 
     goEdit() {
       uni.navigateTo({ url: `/pages/match/edit?id=${this.matchId}` });
+    },
+    goCaptainPick() {
+      uni.navigateTo({ url: `/pages/match/captainPick?id=${this.matchId}` });
     },
     goTeamSplit() {
       uni.navigateTo({ url: `/pages/match/teamSplit?id=${this.matchId}` });
@@ -1624,4 +1647,11 @@ export default {
 .raw-name { font-size: 28rpx; color: #1e293b; font-weight: 600; }
 .raw-score { font-size: 24rpx; color: #6b7280; }
 .raw-display { font-size: 24rpx; color: #f59e0b; font-weight: 700; }
+
+/* 队长选人 */
+.captain-pick-card { background: linear-gradient(135deg, #fef3c7, #fef9c8); }
+.captain-pick-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16rpx; }
+.captain-pick-title { font-size: 32rpx; font-weight: 700; color: #92400e; }
+.captain-pick-status { font-size: 24rpx; color: #f59e0b; font-weight: 600; background: #fff; padding: 4rpx 12rpx; border-radius: 8rpx; }
+.captain-pick-info { display: flex; flex-direction: column; gap: 8rpx; font-size: 26rpx; color: #78350f; }
 </style>

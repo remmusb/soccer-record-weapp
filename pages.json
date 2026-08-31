@@ -49,6 +49,14 @@
       }
     },
     {
+      "path": "pages/match/captainPick",
+      "style": {
+        "navigationBarTitleText": "队长选人",
+        "navigationBarBackgroundColor": "#16a34a",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/players/list",
       "style": {
         "navigationBarTitleText": "球员列表",
