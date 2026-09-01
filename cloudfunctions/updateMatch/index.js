@@ -45,15 +45,35 @@ exports.main = async (event, context) => {
   
   // 检查管理员权限
   let isAdmin = false;
+  let myPlayerId = '';
   if (OPENID) {
     const player = await db.collection('players').where({ _openid: OPENID }).get();
     if (player.data.length > 0) {
-      const admin = await db.collection('admins').where({ playerId: player.data[0]._id }).get();
+      myPlayerId = player.data[0]._id;
+      const admin = await db.collection('admins').where({ playerId: myPlayerId }).get();
       isAdmin = admin.data.length > 0;
     }
   }
+  
+  // 如果不是管理员，检查是否是队长选人操作
+  let isCaptainPicker = false;
   if (!isAdmin) {
-    return { success: false, error: '无权限' };
+    const { data: matchData } = await db.collection('matches').doc(matchId).get();
+    const cp = matchData.captainPick || {};
+    const captainA = cp.captainA || '';
+    const captainB = cp.captainB || '';
+    
+    if (myPlayerId && (myPlayerId === captainA || myPlayerId === captainB)) {
+      // 队长只允许更新分队名单和 captainPick 状态
+      const allowedKeys = ['teamA.players', 'teamB.players', 'teamA.captainId', 'teamB.captainId',
+        'captainPick.currentPicker', 'captainPick.pickCount', 'captainPick.pickRound', 'captainPick.status'];
+      const updateKeys = Object.keys(updateData);
+      isCaptainPicker = updateKeys.every(k => allowedKeys.includes(k));
+    }
+    
+    if (!isCaptainPicker) {
+      return { success: false, error: '无权限' };
+    }
   }
   
   // 内容安全检查

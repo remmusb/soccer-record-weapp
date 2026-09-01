@@ -503,7 +503,7 @@ export default {
           name: 'updateMatch',
           data: { matchId: this.matchId, updateData }
         });
-        if (this.isAdmin) {
+        if (this.isAdmin && !this.captainPickMode) {
           try {
             await wx.cloud.callFunction({
               name: 'sendNotification',

@@ -310,6 +310,16 @@ export default {
           data: { matchId: this.matchId, updateData }
         });
         
+        // 选人全部完成，发送分队通知
+        if (updateData['captainPick.status'] === 'done') {
+          try {
+            await wx.cloud.callFunction({
+              name: 'sendNotification',
+              data: { type: 'team_split', matchId: this.matchId }
+            });
+          } catch (e) { console.error('分队通知发送失败', e); }
+        }
+        
         if (result.success) {
           uni.showToast({ title: '选人成功' });
           await this.loadMatch();
