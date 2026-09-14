@@ -418,15 +418,9 @@ export default {
         this.currentPicker = this.currentPicker === 'A' ? 'B' : 'A';
       } else {
         // ABBA 蛇形: A→B→B→A→A→B→B→A...
-        const round = Math.floor(this.pickCount / 2);
-        const posInRound = this.pickCount % 2;
-        if (round % 2 === 0) {
-          // 偶数轮: A先B后
-          this.currentPicker = posInRound === 0 ? 'B' : 'A';
-        } else {
-          // 奇数轮: B先A后
-          this.currentPicker = posInRound === 0 ? 'A' : 'B';
-        }
+        // 选人序号（从1开始）对应的选人者循环模式
+        const pattern = ['A', 'B', 'B', 'A'];
+        this.currentPicker = pattern[this.pickCount % 4];
       }
     },
     

@@ -14,6 +14,20 @@ exports.main = async (event, context) => {
     return { success: false, error: '缺少 matchId' };
   }
   
+  // 权限校验：仅管理员（含高级管理员，均为 admins 集合成员）可删除场次
+  const { OPENID } = cloud.getWXContext();
+  let isAdmin = false;
+  if (OPENID) {
+    const player = await db.collection('players').where({ _openid: OPENID }).get();
+    if (player.data.length > 0) {
+      const admin = await db.collection('admins').where({ playerId: player.data[0]._id }).get();
+      isAdmin = admin.data.length > 0;
+    }
+  }
+  if (!isAdmin) {
+    return { success: false, error: '无权限' };
+  }
+  
   try {
     // 1. 获取场次信息
     console.log(`[deleteMatch] 步骤1: 获取场次信息`);

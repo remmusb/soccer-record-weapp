@@ -1097,7 +1097,16 @@ export default {
         success: async (res) => {
           if (res.confirm) {
             wx.showLoading({ title: '删除中' });
-            try { await db.collection('matches').doc(this.matchId).remove(); uni.showToast({ title: '已删除' }); uni.navigateBack(); }
+            try {
+              // 通过云函数删除：云端有最高权限，不受记录创建者限制，
+              // 且会自动清理相关评分记录并重新统计
+              await wx.cloud.callFunction({
+                name: 'deleteMatch',
+                data: { matchId: this.matchId }
+              });
+              uni.showToast({ title: '已删除' });
+              uni.navigateBack();
+            }
             catch (e) { uni.showToast({ title: '删除失败', icon: 'none' }); }
             wx.hideLoading();
           }

@@ -277,13 +277,10 @@ export default {
         if (this.pickOrder === 'alternate') {
           nextPicker = this.currentPicker === 'A' ? 'B' : 'A';
         } else {
-          const round = Math.floor(newPickCount / 2);
-          const posInRound = newPickCount % 2;
-          if (round % 2 === 0) {
-            nextPicker = posInRound === 0 ? 'B' : 'A';
-          } else {
-            nextPicker = posInRound === 0 ? 'A' : 'B';
-          }
+          // ABBA 蛇形: A→B→B→A→A→B→B→A...
+          // 选人序号（从1开始）对应的选人者循环模式
+          const pattern = ['A', 'B', 'B', 'A'];
+          nextPicker = pattern[newPickCount % 4];
         }
         
         const updateData = {
